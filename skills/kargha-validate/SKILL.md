@@ -46,10 +46,10 @@ design_path="<caller-provided-path>"
 # If it's a directory, find HTML files
 if [ -d "$design_path" ]; then
   # Prefer standalone variant (no CDN dependency)
-  design_file=$(find "$design_path" -maxdepth 2 -name '*standalone*.html' | head -1)
+  design_file=$(find "$design_path" -maxdepth 2 -name '*standalone*.html' ! -name '*print*' | sort | head -1)
   # Fall back to any HTML file
   if [ -z "$design_file" ]; then
-    design_file=$(find "$design_path" -maxdepth 2 -name '*.html' ! -name '*print*' | head -1)
+    design_file=$(find "$design_path" -maxdepth 2 -name '*.html' ! -name '*print*' | sort | head -1)
   fi
 else
   design_file="$design_path"

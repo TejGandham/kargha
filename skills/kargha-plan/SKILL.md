@@ -25,7 +25,7 @@ Where this document shows a concrete tool or library, treat it as an **example**
 
 ## Project configuration (resolve once, up front)
 
-Resolve each setting in this order: **explicit user input → detect from the repo → ask the user** (batch all unknowns into a single `AskUserQuestion`). Do not prompt for things you can detect.
+Resolve each setting in this order: **explicit user input → detect from the repo → ask the user** (batch all unknowns into a single `AskUserQuestion`). Do not prompt for things you can detect. **When detection conflicts with explicit user input or the project's documented/blessed stack, the stated stack wins — confirm it rather than asserting what's merely present** (a repo can be mid-migration, so a detected framework/library shows the *current* state, not the intended target).
 
 | Setting | What it is | How to resolve |
 | ------- | ---------- | -------------- |
