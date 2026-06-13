@@ -1,4 +1,6 @@
-# Frontend design-to-implementation skills
+# kargha
+
+> **करघा** — *a loom.* Load a design, weave it into built, verified frontend, one slice at a time.
 
 A three-skill pipeline that turns a **design prototype** into **reviewed, merged frontend code** — planning the work, implementing it, and validating visual fidelity. The skills are stack-agnostic: each resolves the project's component library, icon set, token/theme system, data layer, toolchain, and ticketing system up front (detect → ask), then works against whatever it finds.
 
