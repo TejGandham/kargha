@@ -1,6 +1,6 @@
 ---
-name: plan-frontend-generic
-description: Analyze a design HTML export (e.g., from Claude Design) and decompose it into vertical-slice tickets for frontend implementation. Reads design files (JSX components, CSS tokens, page navigation, mock data, screenshots), maps design components to the project's component library, design tokens to the project's theme/token system, design icons to the project's icon libraries, and cross-references the project's data layer (mocked or stubbed, GraphQL schema, REST types, etc.). Emits self-contained tickets into any ticketing system (JIRA, Linear, GitHub Issues,...) OR as plain Markdown/JSON ticket files. Each ticket includes a component-to-library mapping so implementers know which library components to use. Invoke when the user has a design prototype and wants implementation tickets — trigger phrases include "plan the frontend for this design", "break this design into tickets", "create frontend tickets from this design", "plan frontend from the HTML export", "slice this design into implementation work", or any request that combines a design HTML path with ticket/planning intent.
+name: kargha-plan
+description: Analyze a design HTML export (e.g., from Claude Design) and decompose it into vertical-slice tickets for frontend implementation. Reads the design's components, tokens, navigation, and mock data; maps design components to the project's component library, tokens to its theme/token system, icons to its icon libraries, and cross-references its data layer (GraphQL schema, REST types, or stubbed). Emits self-contained tickets into any ticketing system (JIRA, Linear, GitHub Issues, …) OR as plain Markdown/JSON files. Each ticket includes a component-to-library mapping so implementers know which library components to use. Invoke when the user has a design prototype and wants implementation tickets — trigger phrases include "plan the frontend for this design", "break this design into tickets", "create frontend tickets from this design", or "slice this design into implementation work".
 ---
 
 
@@ -15,7 +15,7 @@ This skill is stack-agnostic about the **project** side. It does **not** assume 
 
 - **Component library:** any library, several libraries, or none. With no library, every component is "custom" — the mapping still tells you exactly what to build.
 - **Icon libraries:** a primary source, optional fallbacks, or none.
-- **Token/theme system:** a theme object, CSS custom properties, a design-tokens file (incl. W3C DTCG JSON — see "DTCG token systems" below), a utility-class framework, or plain CSS.
+- **Token/theme system:** a theme object, CSS custom properties, a design-tokens file (incl. W3C DTCG JSON — see references/dtcg-tokens.md), a utility-class framework, or plain CSS.
 - **Data layer:** GraphQL schema, REST/OpenAPI types, generated TS types, or none (stub until available).
 - **Ticket destination:** any ticketing system, or plain Markdown/JSON files written to a directory.
 
@@ -32,7 +32,7 @@ Resolve each setting in this order: **explicit user input → detect from the re
 | **Frontend app dir** | Where components/routes/styles live | Detect the package that depends on the UI framework (e.g., a `package.json` with `react`/`next`/`vue`/`svelte`); in a monorepo with multiple frontend apps, **ask** which app the design targets (an export carries no app identifier, so it is not detectable). One planning run targets exactly one `<frontend-app>` |
 | **Component library** | UI-primitive library/libraries the project uses (0..n) | Detect from `package.json` deps + existing import statements; may legitimately be none |
 | **Icon libraries** | Primary icon source + optional fallbacks | Detect from deps/imports; may be none |
-| **Token/theme system** | The source of truth for colors / spacing / radius / typography / shadows | Detect: a theme object, CSS custom properties in a global stylesheet, a design-tokens file (incl. W3C DTCG JSON — resolve the extra settings in "DTCG token systems" below), a utility-class config, or plain CSS |
+| **Token/theme system** | The source of truth for colors / spacing / radius / typography / shadows | Detect: a theme object, CSS custom properties in a global stylesheet, a design-tokens file (incl. W3C DTCG JSON — resolve the extra settings in references/dtcg-tokens.md), a utility-class config, or plain CSS |
 | **Data layer** | The API the UI reads from | Detect: a GraphQL schema file, OpenAPI/REST types, generated TS client types; may be none |
 | **Project rules** | Component / data conventions the repo documents | Detect: contributor docs, lint configs, or rules files; cite them in tickets if present |
 | **Toolchain commands** | lint / test / build invocations | Detect from package scripts and the repo's task runner (npm/pnpm/yarn scripts, Nx, Turborepo, Make, etc.) |
@@ -41,18 +41,9 @@ Resolve each setting in this order: **explicit user input → detect from the re
 
 Record the resolved values — every later phase references them. In this document, placeholders like `<frontend-app>`, `<component-lib>`, `<icon-lib>`, `<fallback-icon-lib>`, `<schema>`, `<lint command>`, `<test command>`, `<build command>` refer to these resolved settings.
 
-### DTCG token systems (extra settings, resolved only when the token system is DTCG)
+### DTCG token systems (extra settings)
 
-When the **Token/theme system** is a design-token file in W3C DTCG format (JSON leaves carrying `$value`/`$type`, usually alongside a token build tool such as Style Dictionary / Terrazzo and a build script), resolve these additional settings so Phases 2, 4a.2, 4c, and the ticket's **Token Changes** section can author tier-correct, build-actionable token guidance. (These mirror the implementation skill `build-frontend-generic`'s DTCG settings — keeping the two in sync is what lets a plan-authored token addition be applied without re-asking the user at build time.)
-
-| Setting | What it is | How to resolve |
-|-|-|-|
-| `<token-source-dir>` | The DTCG JSON files — the only editable token surface | Detect from the build script's `source` config, or glob for `$value`-bearing JSON |
-| `<token-build-command>` | Regenerates artifacts from the JSON | Detect from package scripts (e.g. `build:tokens`) |
-| `<generated-token-artifacts>` | Build outputs (e.g. a generated `tokens.css`) — read-only; tickets must never hand-edit them | Detect from the build script's output path or a "GENERATED" header |
-| Tier convention | Which tiers exist (primitive/semantic/component) and which one new code may consume | Read the token dir's README/conventions doc; a common rule is "consume semantic, never primitives", including documented transitional-debt carve-outs |
-| Name-resolution rule | How a token path maps to the emitted variable name — often a vendor `$extensions` key (e.g. `com.<project>.cssName`), else path-derived | Scan `$extensions` keys on a few tokens; the key is project-specific — never assume one |
-| Theme-context selector | How alternate contexts are activated (e.g. `[data-theme="dark"]`, a `.dark` class, `prefers-color-scheme`) | Detect from the build config's per-context selectors and the source files (e.g. a `semantic.dark.json`) |
+When the **Token/theme system** is a W3C DTCG design-token file (JSON leaves carrying `$value`/`$type`, usually alongside a token build tool such as Style Dictionary / Terrazzo), resolve the additional DTCG-only settings in **[references/dtcg-tokens.md](references/dtcg-tokens.md)** so Phases 2, 4a.2, 4c, and the ticket's **Token Changes** section can author tier-correct, build-actionable guidance. (These mirror `kargha-build`'s DTCG settings — keeping them in sync is what lets a plan-authored token addition be applied without re-asking at build time.)
 
 ## Workflow
 
@@ -342,7 +333,7 @@ Every icon used in the design must be mapped to a concrete icon import. Designs 
     | Font size | `14px`                     | the `sm` font-size token                                       | Use the typography prop or token                            |
     | Shadow    | `var(--shadow-sm)`         | the `sm` shadow token                                          | Use the shadow token                                        |
 
-    **Tiered (DTCG) token systems — map to the *consumable* tier.** When the project's token system has tiers (per the "DTCG token systems" settings), the project-token side of every mapping must be a token in the tier new code is allowed to consume — typically **semantic**, never primitives (e.g. design `--blue-700` → `semantic.color.accent`, *not* a raw ramp shade like `--p600`). Shade-ramp names are primitive-tier, and the implementation skill `build-frontend-generic` runs a deterministic check that flags primitive consumption in new code — so a map that resolves a design value to a primitive shade sends the implementer straight into a guaranteed conformance failure. If a design value matches *only* a primitive with no semantic equivalent, that is a **"no semantic match"** (classified "No match" in step 3, then handled as a candidate new semantic token in step 5 / the Token Changes section), not a direct mapping. Capture the tier of each project token mapped (the Phase 2 DTCG inventory provides it).
+    **Tiered (DTCG) token systems — map to the *consumable* tier.** When the project's token system has tiers (per the "DTCG token systems" settings), the project-token side of every mapping must be a token in the tier new code is allowed to consume — typically **semantic**, never primitives (e.g. design `--blue-700` → `semantic.color.accent`, *not* a raw ramp shade like `--p600`). Shade-ramp names are primitive-tier, and the implementation skill `kargha-build` runs a deterministic check that flags primitive consumption in new code — so a map that resolves a design value to a primitive shade sends the implementer straight into a guaranteed conformance failure. If a design value matches *only* a primitive with no semantic equivalent, that is a **"no semantic match"** (classified "No match" in step 3, then handled as a candidate new semantic token in step 5 / the Token Changes section), not a direct mapping. Capture the tier of each project token mapped (the Phase 2 DTCG inventory provides it).
 
 3. Classify each design token:
 
@@ -352,7 +343,7 @@ Every icon used in the design must be mapped to a concrete icon import. Designs 
     | **Close match**  | Design value is within ~2px / ~1 shade of a token      | Use the closest token — note the minor difference in the ticket                                 |
     | **No match**     | Design value has no equivalent in the consumable tier  | **Flag to user.** For a tiered (DTCG) system, offer the options in the implementation skill's vocabulary (next paragraph) so the decision is build-actionable, not a vague "extend the theme" |
 
-4. Include a **Design Token Map** section in the foundation ticket (or the first ticket if no foundation ticket — see Phase 4c for which case applies). So that page tickets stay self-contained (the implementation skill reads one ticket file at a time, and this skill guarantees — see the intro and Phase 4e — that any unblocked ticket is independently implementable), do **not** make later tickets depend on reading the foundation ticket. Instead, in Mode B write the full map once as a sibling artifact `00-token-map.md` and have each ticket's Design Token Map line cite it by path *and* carry the slim subset of tokens that ticket actually uses; in Mode A, carry the slim per-ticket subset inline. Any token the ticket proposes to add goes in that ticket's **Token Changes** section (see the template), not only the foundation ticket.
+4. Include a **Design Token Map** section in the foundation ticket (or the first ticket if no foundation ticket — see Phase 4c for which case applies). So that page tickets stay self-contained (the implementation skill reads one ticket file at a time, and this skill guarantees — see the intro and Phase 4e — that any unblocked ticket is independently implementable), do **not** make later tickets depend on reading the foundation ticket. Instead, in Mode B write the full map once as a sibling artifact `00-token-map.md` and have each ticket's Design Token Map line cite it by path *and* carry the slim subset of tokens that ticket actually uses; in Mode A, carry the slim per-ticket subset inline. Any token the ticket proposes to add goes in that ticket's **Token Changes** section (see the Token Changes section in references/ticket-template.md), not only the foundation ticket.
 
 5. **When tokens don't map:** Use `AskUserQuestion` to surface mismatches before filing tickets, and **record the user's decision in the ticket's Token Changes section** so the implementation skill can act on it without re-asking. For a tiered (DTCG) system, frame the options in the implementation skill's vocabulary:
     - **(a) Use the nearest existing token in the consumable tier** (note the delta in the ticket).
@@ -382,7 +373,7 @@ Check whether the component library + theme system are integrated in the fronten
 
 Also check whether shared app chrome (Sidebar, TopBar, root layout) exists. If not and the design includes it, either include it in the foundation ticket or as a separate app-shell ticket.
 
-**Foundation and app-shell tickets and the Design Reference.** A pure foundation ticket has no design *view* to validate. It still gets a Design Reference (the implementation skill hard-gates on the section's presence), but with `**View:** \`none\` — setup ticket, design validation not applicable`. When drafting from the Phase 5 template for such a ticket, apply the foundation carve-outs the template marks: the Acceptance Criteria's "Design validation passes" line and the whole Design Validation Loop are N/A. The implementation skill's Gate 3 accepts `View: \`none\`` and skips design validation (and the dev server) for these — so this is a wired contract, not a request. An app-shell ticket (Sidebar/TopBar) *does* have a view — give it a real `**View:**` and route.
+**Foundation and app-shell tickets and the Design Reference.** A pure foundation ticket has no design *view* to validate. It still gets a Design Reference (the implementation skill hard-gates on the section's presence), but with `**View:** \`none\` — setup ticket, design validation not applicable`. When drafting from the ticket template (references/ticket-template.md) for such a ticket, apply the foundation carve-outs the template marks: the Acceptance Criteria's "Design validation passes" line and the whole Design Validation Loop are N/A. The implementation skill's Gate 3 accepts `View: \`none\`` and skips design validation (and the dev server) for these — so this is a wired contract, not a request. An app-shell ticket (Sidebar/TopBar) *does* have a view — give it a real `**View:**` and route.
 
 #### 4d. Data-layer gaps (always ask)
 
@@ -414,208 +405,7 @@ Each slice must be independently implementable and verifiable — it should rend
 
 ### Phase 5 — Draft ticket descriptions
 
-For each identified vertical slice, draft a ticket description using this template. (`<frontend-app>`, `<component-lib>`, etc. refer to the resolved Project configuration.)
-
-````markdown
-## Context
-
-<1-2 sentences: what this ticket implements and why>
-
-**Parent / group:** <epic key | project | group label | none>
-**Depends on:** [ticket refs] | none
-
-## Design Reference
-
-- **Design file:** `<design_file>` (the absolute path resolved in Phase 0a — same value here and in the Validation parameters below)
-- **View:** `<page id>` — navigate via sidebar > <label>  *(foundation/setup tickets: `none` — setup ticket, design validation not applicable)*
-- **Components in scope:** <list>
-- **Screenshots:** `<path-to-screenshots/>` (if a screenshots/assets dir was found in Phase 0a; omit otherwise)
-
-## Component-to-Library Map
-
-| Design Component | Library Mapping                                  | Notes                         |
-| ---------------- | ------------------------------------------------ | ----------------------------- |
-| Button           | `Button` (variant="primary", color="brand")      | Direct match                  |
-| Badge            | `Badge` (variant="pill", size="sm")              | Direct match                  |
-| SignalCard       | **Custom** — composes `Badge`, `Avatar`, `Tag`   | Domain-specific               |
-| FilterBar        | **Composite** — `Tabs` + `Badge` buttons         | Tab navigation + filter chips |
-| ...              | ...                                              | ...                           |
-
-## Icon Mapping
-
-(Only for tickets that use icons — per 4a.1. Omit the section if the ticket uses none.)
-
-| Design Icon | Source | Import | Notes |
-| ----------- | ------ | ------ | ----- |
-| `radar`     | primary | `Signal01` from `<icon-lib>/…/Signal01` | Closest match |
-| `sparkle`   | fallback | `{ Sparkles }` from `<fallback-icon-lib>` | No primary match |
-
-### Missing Icons
-
-(Only when one or more design icons have no library match — per 4a.1 step 4. Omit when all icons mapped.)
-
-- `drag-handle` — **custom SVG needed** (no configured library has it); used in <where/why>
-
-## Component Plan
-
-### <ComponentName> (custom | wrapper)
-
-- **File:** `<frontend-app>/<path>/<ComponentName>.<ext>`
-- **Type:** presentational | data-owning | view-controller
-- **Props:**
-    ```typescript
-    interface <ComponentName>Props {
-      // key props with types
-    }
-    ```
-- **Styles:** `<ComponentName>` styles per the project's styling approach
-- **Library components used:** `Badge`, `Avatar`, `Tag` (list library components composed within)
-- **Data ownership** (if applicable): the operation/fragment this component owns, e.g.
-    ```graphql
-    fragment <ComponentName>Fragment on <Type> {
-      <fields>
-    }
-    ```
-    (or the REST fields it reads, if not GraphQL)
-- **Key behaviors:** <hover states, click handlers, state changes>
-- **Design reference:** `<file>:<line-range>` in design source
-
-(Omit component plan entries for pure library usage — the mapping table is sufficient.)
-
-## Route / Layout
-
-(Adapt to the project's router — file-based or config-based. *Foundation/setup tickets with `View: none`: omit this section — there is no route; record any root-layout/provider wiring under Foundation Setup Checklist instead.*)
-
-- **Route:** `<how this view's route is declared>`
-- **Served URL:** `</exact/live/path>` — the concrete URL path the running app serves this view at (the build skill uses this verbatim for its dev-server health check and the validator; it falls back to deriving the URL from the route declaration only if this line is absent, which is error-prone — always fill it)
-- **Layout changes:** <shared layout modifications if any>
-- **Navigation:** <how users reach this view in the running app>
-
-## Data Layer
-
-(*Foundation/setup tickets: omit unless the setup itself touches the data layer, e.g. bootstrapping the API client.*)
-
-- **Operation:** the query/endpoint this view calls, e.g.
-    ```graphql
-    query <OperationName> {
-      <fields with fragment spreads>
-    }
-    ```
-    (or the REST endpoint + response shape, if not GraphQL)
-- **Fetch policy / caching:** <default, or note any deviation with reason>
-- **Schema gaps:** <list fields needed but missing, with strategy: stub/blocked>
-- **Mock handlers:** <list mock handlers needed for testing>
-
-## Design Token Map
-
-(Full map in the foundation ticket; if 4c skipped the foundation, in the first page ticket. In Mode B the full map also lives in a sibling `00-token-map.md`, and each page ticket carries the slim subset of tokens it uses plus a pointer to that file — so every ticket stays self-contained.)
-
-The project's token/theme system is the **source of truth** for all design tokens. Do NOT copy the design's tokens stylesheet into the app — use project tokens via the library's props and the project's variables/classes. For a tiered (DTCG) system, map to the **consumable tier only** (typically semantic, never primitives — the Tier column makes this explicit).
-
-| Design Token             | Project Token (tier)              | Usage                                      |
-| ------------------------ | --------------------------------- | ------------------------------------------ |
-| `--blue-700` / `#0E5ECF` | `semantic.color.accent` (semantic) | Color prop `color="brand"` or `var(--accent)` in CSS |
-| `--gray-500` / `#667085` | `semantic.color.text-2` (semantic) | `var(--text-2)`                            |
-| ...                      | ...                               | ...                                        |
-
-**Tokens with no consumable-tier match:** <list any — each becomes a Token Changes entry below or a resolved user decision>
-
-## Token Changes
-
-(DTCG / tiered token systems only. Lists the tokens this ticket needs that **don't yet exist in the consumable tier** — the Design Token Map above covers tokens that already exist; this section covers tokens to **add**. It is the implementation skill's authorization to create them. **Omit the whole section** when every design token maps to an existing consumable-tier token — the common case. Carry the rows in every ticket that consumes the token; don't make a page ticket depend on reading the foundation ticket.)
-
-One row per proposed token (example rows shown — the project's name-resolution rule here is a vendor `cssName` extension, so paths map to `--<name>`):
-
-| Token (path → var) | Op | Value — base / <context> | Source file(s) | Covers | Auth |
-|-|-|-|-|-|-|
-| `semantic.color.surface-info` → `--surface-info` | `add` | `#eef4fb` / dark `#1c2430` (literal) | `semantic.json`, `semantic.dark.json` | InfoBanner background | autonomous |
-| `semantic.color.accent-quiet` → `--accent-quiet` | `add` | `{color.burgundy.600}` (alias; one value across contexts — safe because `burgundy.600` isn't re-pointed in dark) | `semantic.json` | muted accent on FilterChip | autonomous |
-| `color.burgundy.950` → `--p950` | `add-primitive` | `#2a0410` (net-new stop beyond the existing `…900`) | `primitives.json` | darkest ramp stop the design introduces | **requires build-time confirmation** |
-
-Column legend:
-
-- **Token (path → var):** the DTCG token path and the emitted CSS variable, named per the project's name-resolution rule (vendor `$extensions` cssName, else path-derived). The name must be unambiguous and must not collide with an existing token — an ambiguous or duplicate name forces a build-time ask instead of an autonomous add.
-- **Op (this encodes tier):** `add` = an additive **semantic** token — the *only* case the implementation skill applies autonomously; `add-primitive` = a new primitive ramp entry; `mutate` = change an existing token's `$value`. `add-primitive` and `mutate` are never autonomous — put **"requires build-time confirmation"** in their Auth cell, or land them in the foundation ticket under explicit user approval recorded here.
-- **Value — base / <context>:** an **alias** to a named existing primitive (`{group.token}`) when one matches the design value, else a **literal**. Give a value **per theme context the design defines**: omitting a context override makes that context silently inherit the **base** value (the project's per-context file, e.g. `semantic.dark.json`, is where overrides live), so specify the dark (etc.) value whenever the design's differs — alias or literal alike. An alias is context-stable only when the aliased token isn't itself re-pointed in that context; if it is (e.g. a primitive inside a transitional-debt dark block), give an explicit override.
-- **Source file(s):** the file(s) in `<token-source-dir>` to edit — the semantic-tier file plus the per-context file (e.g. `semantic.json` + `semantic.dark.json`) for any context override. The implementation skill edits these and runs `<token-build-command>`; it never hand-edits `<generated-token-artifacts>`.
-- **Covers:** which design values / components need the token (the "why").
-- **Auth:** `autonomous` (an `add` row whose value the design supplies — the implementation skill applies it without asking) or `requires build-time confirmation`. A row appearing here at all **is** the recorded plan-time user decision from 4a.2 step 5; the Auth cell says whether the build skill may act on it unattended.
-
-Never propose touching documented transitional-debt blocks — flag those to the user instead.
-
-### Foundation Setup Checklist
-
-(Foundation ticket only — omit in page tickets, and in the "already integrated" first-ticket case from 4c.)
-
-- [ ] Bootstrap the component library provider with the project theme/token resolver
-- [ ] Import the library's base stylesheet (if required)
-- [ ] Set up icon library imports
-- [ ] Configure fonts
-- [ ] Verify project tokens cover the design's color/spacing/radius/shadow needs
-- [ ] Add supplemental tokens ONLY for design values with no project equivalent (document why). **DTCG:** edit the DTCG JSON in `<token-source-dir>` (the right tier file, plus the per-context file for any context override) and run `<token-build-command>`; the generated artifacts are read-only
-
-## Acceptance Criteria
-
-- [ ] <Specific, verifiable criterion per component>
-- [ ] Components render matching design layout
-- [ ] Library components used wherever mapped (see Component-to-Library Map)
-- [ ] Interactive states work (hover, active, focus, disabled)
-- [ ] Accessible: semantic HTML, keyboard navigation, ARIA where needed
-- [ ] Co-located test files exist with smoke tests
-- [ ] `<lint command>` passes
-- [ ] `<test command>` passes
-- [ ] (DTCG token systems) Token-conformance passes: no primitive-tier variable consumption in new code, no hand-edits to generated token artifacts, no hardcoded values duplicating tokens
-- [ ] Design validation passes (match, or partial with only cosmetic/minor issues) — see Verification  *(omit for foundation/setup tickets with `View: none` — design validation is N/A)*
-
-## Implementation Notes
-
-- Follow the project's component conventions <cite rules file if present>
-- Follow the project's data-layer conventions <cite rules file if present>
-- Use `<component-lib>` components per the mapping table — do not rebuild primitives the library provides
-- **All styling must reference project theme tokens** — use library props (`color="brand"`, `spacing="md"`, `radius="sm"`) for library components and project token variables/classes in custom styles. Never hardcode hex colors, px spacing, or px radii that duplicate project token values. For a tiered (DTCG) system, consume the **semantic tier only** — primitives are deny-listed for new code, and any needed-but-missing token is in this ticket's Token Changes section.
-- Design uses inline styles — implementation must use the project's styling approach (or library props)
-- Design uses hardcoded mock data — implementation must use the project's data layer
-- Design uses client-side `useState` navigation — implementation uses the project's router
-- **If a design-validation tool/skill is available:** run it in a loop (up to 3 rounds) to verify fidelity against the design prototype — see Verification
-
-## Files to Create
-
-- `<frontend-app>/<path>/<Component>.<ext>`
-- `<frontend-app>/<path>/<Component>` styles
-- `<frontend-app>/<path>/<Component>` test
-- (list all files)
-
-## Verification
-
-```bash
-<lint command>
-<test command>
-<build command>
-```
-
-### Design Validation Loop (if available)
-
-**Foundation/setup tickets (`View: none`): this whole loop is N/A — omit it.** There is no view to validate; the ticket's done-definition is lint/test + token-conformance + PR. For all other tickets:
-
-If the environment provides a design-validation tool/skill, run it to compare the running app against the design prototype. Treat it as a **required loop** — up to 3 rounds. Each round fixes `critical` then `major` discrepancies; the exit bar is **zero critical and zero major** (a `match`, or a `partial` with only minor/cosmetic left). Minor and cosmetic issues are acceptable — do not burn rounds chasing them; list any residuals in the PR body.
-
-1. **Round 1:** Validate with the design file, app route, and navigation. Fix critical, then major, discrepancies.
-2. **Round 2:** Re-validate after fixes. Fix any remaining critical/major.
-3. **Round 3:** Final pass. Exit when zero critical and zero major remain; document any minor/cosmetic residuals as follow-up.
-
-Stop early once zero critical and zero major remain. Do not exceed 3 rounds — if major issues persist, document them as follow-up work. If no validation tool exists, this becomes a manual visual checklist against the design file. (This matches the implementation skill's exit criteria, so a build agent executing the ticket and the acceptance criterion above agree on the bar.)
-
-**Validation parameters for this ticket:**
-
-- Design file: `<design_file>` (same absolute path as the Design Reference)
-- App route: `<route>`
-- Design navigation: `<instructions to reach this view in the design prototype>`
-- App navigation: `<steps beyond loading the route to reach the view in the running app, e.g. "click the first row to open the detail panel" — REQUIRED for slideout/modal/detail sub-view tickets; omit when the route's initial render is the view>`
-- Viewport: `<WxH, e.g. 1440x900; omit for the tool's default>`
-- Theme context(s): `<base only | base + <context> (smoke) | base + <context> (full)>`. Emit a non-default context only when the token system declares one. **smoke** (the safe default) → the implementation skill renders the app in that context and checks no theme variable resolves empty; needs nothing from the design side. **full** → a complete second design-validation loop, only meaningful when the *design prototype itself* supports the context (per Phase 1's theme-switching report). The Design/App navigation lines above stay **base-only** (so the base loop really validates base); supply the context switch separately in the next line so the build applies it only for the second loop.
-- Context switch (only for a `full` alternate context): `<the extra steps that switch BOTH the design prototype and the app into the alternate context, e.g. "click the theme toggle in the top bar">`. The validator has no theme input of its own — it drives the switch through this navigation, appended to the base navigation for the second loop only.
-- Focus areas: `<relevant dimensions if scoped, otherwise omit>`
-````
+For each identified vertical slice, draft a ticket description by copying the canonical template in **[references/ticket-template.md](references/ticket-template.md)** verbatim and filling its placeholders (`<frontend-app>`, `<component-lib>`, etc. refer to the resolved Project configuration). **The section headings and line formats in that template are the plan→build parse contract — `kargha-build` parses the emitted ticket, so emit them exactly as written** (em-dashes, backticks, and the ` / ` cell separators included).
 
 **Size management.** After drafting, estimate each description's size. If it's large (over ~12 KB, or near your ticketing system's payload limit):
 

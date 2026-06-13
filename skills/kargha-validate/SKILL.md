@@ -1,5 +1,5 @@
 ---
-name: validate-design
+name: kargha-validate
 description: Compare a running frontend implementation against design HTML files exported from Claude Design. Opens both the live app (at the caller-provided app URL) and the served design prototype in playwright-cli, captures screenshots and DOM snapshots, then reports structured discrepancies across layout, color, typography, spacing, component structure, and visual hierarchy. Validates one view per invocation — the calling pipeline loops for multiple views. Invoke when validating implementation fidelity — trigger phrases include "validate against the design", "compare implementation to design", "check design fidelity", "does this match the design", "visual QA against design HTML", or any request to diff what's running vs the design prototype files.
 ---
 
@@ -13,7 +13,7 @@ The skill uses two subagents for fresh-context isolation:
 
 ## How this skill adapts to your project
 
-This skill is **stack-agnostic about the app under test**. It does not assume a framework, dev-server port, or font stack — those arrive as inputs from the caller (e.g. the `build-frontend-generic` pipeline, which resolves them per project). The design side assumes a **runtime-JSX export** (a Claude Design-style HTML prototype that compiles JSX via Babel) — that is the supported design-input format, matching the planning/implementation skills.
+This skill is **stack-agnostic about the app under test**. It does not assume a framework, dev-server port, or font stack — those arrive as inputs from the caller (e.g. the `kargha-build` pipeline, which resolves them per project). The design side assumes a **runtime-JSX export** (a Claude Design-style HTML prototype that compiles JSX via Babel) — that is the supported design-input format, matching the planning/implementation skills.
 
 Where this document shows a concrete value (e.g. `http://localhost:3000`, `#__next`, `pnpm nx dev frontend`, the Inter font), treat it as an **example**, not a requirement — it comes from the caller's resolved settings. The browser mechanism (`playwright-cli`) and the two-subagent capture/compare structure are this skill's own internals and stay fixed.
 
@@ -22,7 +22,7 @@ Where this document shows a concrete value (e.g. `http://localhost:3000`, `#__ne
 The caller's prompt must include:
 
 - **Design HTML file path** — absolute or relative to the workspace root (e.g., `signal-test/project/Signal.html`). Can be a directory — the skill picks the best HTML file.
-- **App base URL** (optional) — where the running app is served (e.g., `http://localhost:3000`, `http://localhost:5173`). Defaults to `http://localhost:3000`. The caller (e.g. `build-frontend-generic`) passes its resolved dev-server URL here.
+- **App base URL** (optional) — where the running app is served (e.g., `http://localhost:3000`, `http://localhost:5173`). Defaults to `http://localhost:3000`. The caller (e.g. `kargha-build`) passes its resolved dev-server URL here.
 - **App route** — the URL path in the running app (e.g., `/feed`, `/projects/123`); appended to the base URL.
 - **Design navigation instructions** — explicit steps to reach the target view in the design prototype (e.g., "click the Feed item in the sidebar"). The design uses client-side `useState` page switching, not URL routes. The skill does NOT auto-discover navigation.
 - **App navigation instructions** (optional) — additional steps beyond navigating to the route (e.g., "click the first project row to open the detail panel")
@@ -88,16 +88,16 @@ design_dir=$(dirname "$design_file")
 design_filename=$(basename "$design_file")
 
 # Clean up any prior run's temp directory
-rm -rf /tmp/validate-design
-mkdir -p /tmp/validate-design
+rm -rf /tmp/kargha-validate
+mkdir -p /tmp/kargha-validate
 
 # Start HTTP server on an OS-assigned port
-python3 -m http.server 0 --bind 127.0.0.1 --directory "$design_dir" > /tmp/validate-design/server.log 2>&1 &
+python3 -m http.server 0 --bind 127.0.0.1 --directory "$design_dir" > /tmp/kargha-validate/server.log 2>&1 &
 DESIGN_SERVER_PID=$!
 
 # Wait for the server to start and extract the port
 sleep 1
-DESIGN_SERVER_PORT=$(grep -oE 'port [0-9]+' /tmp/validate-design/server.log | grep -oE '[0-9]+')
+DESIGN_SERVER_PORT=$(grep -oE 'port [0-9]+' /tmp/kargha-validate/server.log | grep -oE '[0-9]+')
 DESIGN_BASE_URL="http://127.0.0.1:${DESIGN_SERVER_PORT}"
 DESIGN_HTML_URL="${DESIGN_BASE_URL}/${design_filename}"
 ```
@@ -115,21 +115,21 @@ If the server fails to start or the page doesn't load, bail and kill the backgro
 
 Spawn a **general-purpose subagent** to capture both the design prototype and the live app using playwright-cli. This subagent is purely mechanical — it navigates, waits, screenshots, and extracts data. It does NOT analyze or compare.
 
-The subagent uses a named browser session `validate-design` for all commands. It interacts with the browser exclusively through `Bash` tool calls running `playwright-cli -s=validate-design ...` commands.
+The subagent uses a named browser session `kargha-validate` for all commands. It interacts with the browser exclusively through `Bash` tool calls running `playwright-cli -s=kargha-validate ...` commands.
 
 **Subagent prompt:**
 
 ```
 You are a browser capture agent. Your job is to navigate to two web pages using playwright-cli, capture screenshots and DOM snapshots, and extract computed CSS values. You do NOT analyze or compare — just capture and return structured data.
 
-You interact with the browser exclusively through Bash commands using playwright-cli with session name "validate-design". Every browser command follows the pattern: playwright-cli -s=validate-design <command> [args]
+You interact with the browser exclusively through Bash commands using playwright-cli with session name "kargha-validate". Every browser command follows the pattern: playwright-cli -s=kargha-validate <command> [args]
 
 ## Setup
 
 Open a browser session and set the viewport:
 
-playwright-cli -s=validate-design open
-playwright-cli -s=validate-design resize ${viewport_width} ${viewport_height}
+playwright-cli -s=kargha-validate open
+playwright-cli -s=kargha-validate resize ${viewport_width} ${viewport_height}
 
 ## Target 1: Design prototype
 
@@ -139,32 +139,32 @@ This is a React prototype that compiles JSX at runtime via Babel. It takes 2-5 s
 
 Steps:
 1. Navigate to the URL:
-   playwright-cli -s=validate-design goto "${DESIGN_HTML_URL}"
+   playwright-cli -s=kargha-validate goto "${DESIGN_HTML_URL}"
 
 2. Wait for React/Babel to finish rendering — the page is blank until #root has child content. This is critical:
-   playwright-cli -s=validate-design run-code "async page => await page.waitForSelector('#root > *', { timeout: 15000 })"
+   playwright-cli -s=kargha-validate run-code "async page => await page.waitForSelector('#root > *', { timeout: 15000 })"
 
 3. ${design_navigation_instructions — e.g., "Take a snapshot to find the sidebar navigation, then click the 'Feed' button:
-   playwright-cli -s=validate-design snapshot
+   playwright-cli -s=kargha-validate snapshot
    Then use the ref from the snapshot output:
-   playwright-cli -s=validate-design click <ref>
+   playwright-cli -s=kargha-validate click <ref>
    "}
 
 4. Take a screenshot — this is the DESIGN screenshot:
-   playwright-cli -s=validate-design screenshot --filename=design.png
+   playwright-cli -s=kargha-validate screenshot --filename=design.png
    Describe what you see in the screenshot.
 
 5. Capture a DOM snapshot WITH bounding boxes — this is the DESIGN DOM snapshot:
-   playwright-cli -s=validate-design snapshot --boxes --filename=design-snapshot.yaml
+   playwright-cli -s=kargha-validate snapshot --boxes --filename=design-snapshot.yaml
    The --boxes flag adds [box=x,y,width,height] annotations to each element — the comparison subagent uses these for quantitative layout and spacing comparison. Save the full output.
 
 6. Check for rendering failures:
-   playwright-cli -s=validate-design console error
-   playwright-cli -s=validate-design requests
+   playwright-cli -s=kargha-validate console error
+   playwright-cli -s=kargha-validate requests
    If you see console errors mentioning Babel, React, or module loading failures, report as DESIGN_HEALTH: DEGRADED with the error text. If you see font or asset requests returning 404, report as DESIGN_ASSET_FAILURES: [list of failed URLs]. If everything looks clean, report DESIGN_HEALTH: OK and DESIGN_ASSET_FAILURES: None. Continue capturing regardless — partial data is better than no data.
 
 7. Extract design tokens and element styles using eval with --raw for clean JSON output:
-   playwright-cli --raw -s=validate-design eval "(() => { const cs = getComputedStyle(document.documentElement); const tokens = {}; const allProps = Array.from(cs).filter(p => p.startsWith('--')); allProps.forEach(p => tokens[p] = cs.getPropertyValue(p).trim()); const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6')).slice(0, 20).map(el => { const s = getComputedStyle(el); return { tag: el.tagName, text: el.textContent.trim().substring(0, 80), fontSize: s.fontSize, fontWeight: s.fontWeight, color: s.color, fontFamily: s.fontFamily.substring(0, 50) }; }); const buttons = Array.from(document.querySelectorAll('button')).slice(0, 20).map(el => { const s = getComputedStyle(el); return { text: el.textContent.trim().substring(0, 40), bg: s.backgroundColor, color: s.color, borderRadius: s.borderRadius, padding: s.padding, fontSize: s.fontSize }; }); return JSON.stringify({ tokens, headings, buttons }); })()"
+   playwright-cli --raw -s=kargha-validate eval "(() => { const cs = getComputedStyle(document.documentElement); const tokens = {}; const allProps = Array.from(cs).filter(p => p.startsWith('--')); allProps.forEach(p => tokens[p] = cs.getPropertyValue(p).trim()); const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6')).slice(0, 20).map(el => { const s = getComputedStyle(el); return { tag: el.tagName, text: el.textContent.trim().substring(0, 80), fontSize: s.fontSize, fontWeight: s.fontWeight, color: s.color, fontFamily: s.fontFamily.substring(0, 50) }; }); const buttons = Array.from(document.querySelectorAll('button')).slice(0, 20).map(el => { const s = getComputedStyle(el); return { text: el.textContent.trim().substring(0, 40), bg: s.backgroundColor, color: s.color, borderRadius: s.borderRadius, padding: s.padding, fontSize: s.fontSize }; }); return JSON.stringify({ tokens, headings, buttons }); })()"
    The --raw flag strips page status and snapshot noise — the output is ONLY the JSON string. Save this as the DESIGN extracted data.
 
 ## Target 2: Live implementation
@@ -173,27 +173,27 @@ URL: ${app_base_url}${app_route}
 
 Steps:
 1. Navigate to the URL:
-   playwright-cli -s=validate-design goto "${app_base_url}${app_route}"
+   playwright-cli -s=kargha-validate goto "${app_base_url}${app_route}"
 
 2. Wait for the main content to be visible (the selector list is framework-agnostic — `#__next` is the Next.js example; `#root`, `#app`, etc. are covered by the `body > *` fallback):
-   playwright-cli -s=validate-design run-code "async page => { for (const sel of ['main', '#__next > *', '#root > *', '#app > *', 'body > *']) { try { await page.waitForSelector(sel, { timeout: 5000 }); return; } catch {} } }"
+   playwright-cli -s=kargha-validate run-code "async page => { for (const sel of ['main', '#__next > *', '#root > *', '#app > *', 'body > *']) { try { await page.waitForSelector(sel, { timeout: 5000 }); return; } catch {} } }"
 
 3. ${app_navigation_instructions — if any, e.g., "Take a snapshot and click the first project row:
-   playwright-cli -s=validate-design snapshot
-   playwright-cli -s=validate-design click <ref>
+   playwright-cli -s=kargha-validate snapshot
+   playwright-cli -s=kargha-validate click <ref>
    "}
 
 4. Take a screenshot — this is the APP screenshot:
-   playwright-cli -s=validate-design screenshot --filename=app.png
+   playwright-cli -s=kargha-validate screenshot --filename=app.png
    Describe what you see in the screenshot.
 
 5. Capture a DOM snapshot WITH bounding boxes — this is the APP DOM snapshot:
-   playwright-cli -s=validate-design snapshot --boxes --filename=app-snapshot.yaml
+   playwright-cli -s=kargha-validate snapshot --boxes --filename=app-snapshot.yaml
    Save the full output.
 
 6. Check for rendering failures:
-   playwright-cli -s=validate-design console error
-   playwright-cli -s=validate-design requests
+   playwright-cli -s=kargha-validate console error
+   playwright-cli -s=kargha-validate requests
    If you see console errors (React errors, uncaught exceptions), report as APP_HEALTH: DEGRADED with the error text. If you see font or asset requests returning 404, report as APP_ASSET_FAILURES: [list of failed URLs]. If everything looks clean, report APP_HEALTH: OK and APP_ASSET_FAILURES: None. Continue capturing regardless.
 
 7. Extract element styles using the same eval command as Target 1 (with --raw). Save as the APP extracted data.
@@ -201,7 +201,7 @@ Steps:
 ## Cleanup
 
 Close the browser session when all captures are complete:
-playwright-cli -s=validate-design close
+playwright-cli -s=kargha-validate close
 
 ## Return format
 
@@ -364,7 +364,7 @@ If STATUS is "match", DISCREPANCIES can be empty. Always include TOKEN_DRIFT, MI
 
 3. **Close the browser session** (defensive — in case the capture subagent failed to close it):
    ```bash
-   playwright-cli -s=validate-design close 2>/dev/null || true
+   playwright-cli -s=kargha-validate close 2>/dev/null || true
    ```
 
 4. **Clean up playwright-cli artifacts:**
@@ -384,14 +384,14 @@ The pipeline caller decides what to do with the discrepancy report.
 
 - **React/Babel render delay.** The design HTML compiles JSX at runtime. The capture subagent MUST use `run-code` with `waitForSelector('#root > *')` before screenshotting. Without this, you get a blank page screenshot.
 - **Design navigation is client-side.** The prototype uses `useState` for page switching — navigate by clicking sidebar elements, not by changing the URL. The caller must provide explicit navigation instructions.
-- **Named sessions enable isolation.** The skill uses a `validate-design` named session. Both captures (design + app) still happen sequentially in one subagent for simplicity, but if parallel captures are ever needed, use distinct session names (e.g., `validate-design-target1`, `validate-design-target2`).
+- **Named sessions enable isolation.** The skill uses a `kargha-validate` named session. Both captures (design + app) still happen sequentially in one subagent for simplicity, but if parallel captures are ever needed, use distinct session names (e.g., `kargha-validate-target1`, `kargha-validate-target2`).
 - **HTTP server directory matters.** The server MUST be started from the design file's parent directory. If you serve from a parent or sibling directory, relative paths to `fonts/`, `assets/`, `uploads/` will 404.
 - **Prefer standalone HTML variants.** Files matching `*standalone*` bundle React/Babel inline and have no CDN dependency. They're larger but more reliable.
 - **The comparison subagent is read-only.** It reports findings. If it accidentally suggests fixes, strip that from the output before returning to the pipeline.
 - **Ignore data content.** Design prototypes use hardcoded mock data. Differences in names, numbers, or dates between design and app are NOT design discrepancies.
-- **Clean `/tmp/validate-design/` at the start** of each run to prevent stale data from a prior invocation contaminating the current one.
-- **Session cleanup on failure.** If the capture subagent crashes or times out, the named session may be left open. Phase 4 defensively runs `playwright-cli -s=validate-design close` to handle this. If stale sessions accumulate, `playwright-cli list` shows all active sessions and `playwright-cli close-all` cleans them up.
+- **Clean `/tmp/kargha-validate/` at the start** of each run to prevent stale data from a prior invocation contaminating the current one.
+- **Session cleanup on failure.** If the capture subagent crashes or times out, the named session may be left open. Phase 4 defensively runs `playwright-cli -s=kargha-validate close` to handle this. If stale sessions accumulate, `playwright-cli list` shows all active sessions and `playwright-cli close-all` cleans them up.
 - **eval requires JSON.stringify for complex return values.** Unlike Playwright MCP's `browser_evaluate` which auto-serialized objects, `playwright-cli eval` returns the raw expression result. Wrap complex return values in `JSON.stringify()` to ensure structured data is captured correctly.
 - **Use `--raw` when you need just the eval result.** Without `--raw`, `eval` output includes page status, generated code, and a snapshot section alongside the actual return value. The capture subagent must use `--raw` so the extracted JSON is the only output — this prevents the subagent from accidentally pasting snapshot text into the EXTRACTED_DATA fields.
 - **`--boxes` increases snapshot size.** Each element gets a `[box=x,y,width,height]` annotation, which roughly doubles the snapshot text. On very large pages, this could approach context limits for the comparison subagent. If you encounter truncation, use `snapshot --boxes --depth=5` to limit the tree depth while still getting bounding boxes for the top-level layout structure.
-- **Filter console output to errors only.** Use `playwright-cli -s=validate-design console error`, not bare `console`. Design prototypes routinely emit Babel deprecation warnings and React development-mode noise that would overwhelm the capture subagent's context.
+- **Filter console output to errors only.** Use `playwright-cli -s=kargha-validate console error`, not bare `console`. Design prototypes routinely emit Babel deprecation warnings and React development-mode noise that would overwhelm the capture subagent's context.
