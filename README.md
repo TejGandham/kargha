@@ -21,7 +21,7 @@ kargha/
   README.md
   skills/
     kargha-plan/      SKILL.md  +  references/{ticket-template.md, dtcg-tokens.md}
-    kargha-build/     SKILL.md  +  references/dtcg-tokens.md
+    kargha-build/     SKILL.md  +  references/{dtcg-tokens.md, design-validation-loop.md}
     kargha-validate/  SKILL.md
 ```
 
@@ -102,4 +102,4 @@ Use `<repo>/.claude/skills/` instead for project scope. The directory name is th
 
 ## Usage
 
-Invoke a skill by pointing it at its input — e.g. "plan the frontend for `./design-export/`", then "build ticket `03-signal-feed.md`". `kargha-build` calls `kargha-validate` automatically when a design-validation tool is configured; you can also run `kargha-validate` standalone to spot-check fidelity. See each skill's `SKILL.md` for the full phase-by-phase workflow, and its `references/` for the ticket template and DTCG token machinery.
+Invoke a skill by pointing it at its input — e.g. "plan the frontend for `./design-export/`", then "build ticket `03-signal-feed.md`". `kargha-build` calls `kargha-validate` automatically when a design-validation tool is configured; you can also run `kargha-validate` standalone to spot-check fidelity. See each skill's `SKILL.md` for the full phase-by-phase workflow, and its `references/` for the ticket template, the DTCG token machinery, and the design-validation loop procedure.
