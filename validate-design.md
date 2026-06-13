@@ -1,6 +1,6 @@
 ---
 name: validate-design
-description: Compare a running frontend implementation against design HTML files exported from Claude Design. Opens both the live app (on localhost:3000) and the served design prototype in playwright-cli, captures screenshots and DOM snapshots, then reports structured discrepancies across layout, color, typography, spacing, component structure, and visual hierarchy. Validates one view per invocation — the calling pipeline loops for multiple views. Invoke when validating implementation fidelity — trigger phrases include "validate against the design", "compare implementation to design", "check design fidelity", "does this match the design", "visual QA against design HTML", or any request to diff what's running vs the design prototype files.
+description: Compare a running frontend implementation against design HTML files exported from Claude Design. Opens both the live app (at the caller-provided app URL) and the served design prototype in playwright-cli, captures screenshots and DOM snapshots, then reports structured discrepancies across layout, color, typography, spacing, component structure, and visual hierarchy. Validates one view per invocation — the calling pipeline loops for multiple views. Invoke when validating implementation fidelity — trigger phrases include "validate against the design", "compare implementation to design", "check design fidelity", "does this match the design", "visual QA against design HTML", or any request to diff what's running vs the design prototype files.
 ---
 
 
@@ -11,16 +11,25 @@ The skill uses two subagents for fresh-context isolation:
 1. **Capture subagent** — uses playwright-cli to screenshot and snapshot both the design and the implementation
 2. **Comparison subagent** — receives only the captured data and produces a structured discrepancy report
 
+## How this skill adapts to your project
+
+This skill is **stack-agnostic about the app under test**. It does not assume a framework, dev-server port, or font stack — those arrive as inputs from the caller (e.g. the `build-frontend-generic` pipeline, which resolves them per project). The design side assumes a **runtime-JSX export** (a Claude Design-style HTML prototype that compiles JSX via Babel) — that is the supported design-input format, matching the planning/implementation skills.
+
+Where this document shows a concrete value (e.g. `http://localhost:3000`, `#__next`, `pnpm nx dev frontend`, the Inter font), treat it as an **example**, not a requirement — it comes from the caller's resolved settings. The browser mechanism (`playwright-cli`) and the two-subagent capture/compare structure are this skill's own internals and stay fixed.
+
 ## Inputs
 
 The caller's prompt must include:
 
 - **Design HTML file path** — absolute or relative to the workspace root (e.g., `signal-test/project/Signal.html`). Can be a directory — the skill picks the best HTML file.
-- **App route** — the URL path in the running Next.js app (e.g., `/feed`, `/projects/123`)
+- **App base URL** (optional) — where the running app is served (e.g., `http://localhost:3000`, `http://localhost:5173`). Defaults to `http://localhost:3000`. The caller (e.g. `build-frontend-generic`) passes its resolved dev-server URL here.
+- **App route** — the URL path in the running app (e.g., `/feed`, `/projects/123`); appended to the base URL.
 - **Design navigation instructions** — explicit steps to reach the target view in the design prototype (e.g., "click the Feed item in the sidebar"). The design uses client-side `useState` page switching, not URL routes. The skill does NOT auto-discover navigation.
 - **App navigation instructions** (optional) — additional steps beyond navigating to the route (e.g., "click the first project row to open the detail panel")
 - **Viewport** (optional) — width x height in pixels. Defaults to 1440x900.
 - **Focus areas** (optional) — narrow the comparison (e.g., "focus on typography and spacing only")
+
+To validate an **alternate theme context** (e.g. dark mode), the caller includes the context-switch steps in the Design navigation and App navigation (e.g. "click the theme toggle") so both sides render in that context — this skill has no separate theme parameter; it reaches the context the same way it reaches any view, through navigation.
 
 ## Workflow
 
@@ -48,15 +57,17 @@ fi
 
 If no HTML file is found, bail with: "No design HTML files found at `<path>`. Provide a path to a Claude Design HTML export."
 
-**0b. Dev server is running.** Check that the frontend app is accessible:
+**0b. Dev server is running.** Resolve the app base URL from the caller's input (default `http://localhost:3000` if not provided), then check the app is accessible:
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}" http://localhost:3000
+app_base_url="<caller-provided-app-base-url>"          # from Inputs; e.g. http://localhost:3000
+app_base_url="${app_base_url:-http://localhost:3000}"  # default only when the caller omitted it
+curl -s -o /dev/null -w "%{http_code}" "$app_base_url"
 ```
 
-If the response is not 2xx, bail with: "The frontend dev server is not running on port 3000. Start it with `pnpm nx dev frontend` and re-run this validation."
+Accept any non-`000` response (a redirect or an auth gate still means the server is up); only `000`/connection-refused is a failure. If it fails, bail with: "The frontend dev server is not reachable at `$app_base_url`. Start it (the project's dev command) and re-run this validation."
 
-Do NOT attempt to start the dev server.
+Do NOT attempt to start the dev server — the caller owns its lifecycle.
 
 **0c. playwright-cli is available.** Verify the CLI is installed:
 
@@ -158,14 +169,14 @@ Steps:
 
 ## Target 2: Live implementation
 
-URL: http://localhost:3000${app_route}
+URL: ${app_base_url}${app_route}
 
 Steps:
 1. Navigate to the URL:
-   playwright-cli -s=validate-design goto "http://localhost:3000${app_route}"
+   playwright-cli -s=validate-design goto "${app_base_url}${app_route}"
 
-2. Wait for the main content to be visible:
-   playwright-cli -s=validate-design run-code "async page => { for (const sel of ['main', '#__next > *', 'body > *']) { try { await page.waitForSelector(sel, { timeout: 5000 }); return; } catch {} } }"
+2. Wait for the main content to be visible (the selector list is framework-agnostic — `#__next` is the Next.js example; `#root`, `#app`, etc. are covered by the `body > *` fallback):
+   playwright-cli -s=validate-design run-code "async page => { for (const sel of ['main', '#__next > *', '#root > *', '#app > *', 'body > *']) { try { await page.waitForSelector(sel, { timeout: 5000 }); return; } catch {} } }"
 
 3. ${app_navigation_instructions — if any, e.g., "Take a snapshot and click the first project row:
    playwright-cli -s=validate-design snapshot
@@ -267,7 +278,7 @@ Compare across each dimension below. A discrepancy is any visible difference bet
 - Compare the CSS token values from the extracted data
 
 ### 3. Typography
-- Font family (design uses Inter / Inter Display)
+- Font family — compare what the design uses against what the app renders (read both from the extracted `fontFamily` data; don't assume a specific family)
 - Font sizes for headings, body text, labels, captions
 - Font weights
 - Compare the heading data from the extracted data

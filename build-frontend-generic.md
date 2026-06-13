@@ -401,6 +401,7 @@ Invoke the configured design-validation skill/tool. It is stack-agnostic: it tak
 
 ```
 Design file: <DESIGN_FILE_PATH>
+App base URL: <dev-server-url>  (the resolved dev-server URL, e.g. http://localhost:3000)
 App route: <APP_ROUTE>  (served at <dev-server-url><APP_ROUTE>)
 Design navigation: <DESIGN_NAVIGATION>
 App navigation: <app-side steps to reach the view, from DESIGN_VALIDATION_PARAMS — pass when present; REQUIRED for slideout/modal/detail sub-views, else the tool only captures the route's initial render>
