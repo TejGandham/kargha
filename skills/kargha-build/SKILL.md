@@ -28,7 +28,7 @@ Resolve each setting in this order: **explicit user input → detect from the re
 
 | Setting | What it is | How to resolve |
 | ------- | ---------- | -------------- |
-| **Frontend app dir** | Where components / routes / styles live, and its task-target name | Detect the package depending on the UI framework (a `package.json` with `react`/`next`/`vue`/`svelte`); in a monorepo pick the app the ticket targets; else ask |
+| **Frontend app dir** | Where components / routes / styles live, and its task-target name | Detect the package depending on the UI framework (a `package.json` with `react`/`next`/`vue`/`svelte`); in a monorepo pick the app the ticket targets; the frontend may also live in a non-root **subdir** of a polyglot repo (e.g. `ui/` beside `backend/`, not a monorepo per se) — root all paths/commands there; else ask |
 | **Component library** | UI-primitive library/libraries the project uses (0..n) and its installed path | Detect from `package.json` deps + existing imports; resolve the install path from the manifest; may legitimately be none |
 | **Icon libraries** | Primary icon source + optional fallbacks | Detect from deps/imports; may be none |
 | **Theme/token system** | Source of truth for colors / spacing / radius / typography / shadows | Detect: theme object, CSS custom properties, a design-tokens file (incl. W3C DTCG JSON — see references/dtcg-tokens.md), a utility-class config, or plain CSS |
@@ -37,9 +37,9 @@ Resolve each setting in this order: **explicit user input → detect from the re
 | **Pickup statuses** | The set of statuses a ticket may be in to be picked up | Ask/detect; default to the project's first two backlog-ish states (e.g. "Backlog", "To Do"); for file tickets, the `status` front-matter field |
 | **In-progress status** | The status to move the ticket to on pickup | Ask/detect (e.g. "In Progress") |
 | **Review status** | The status to move the ticket to once the PR is open | Ask/detect (e.g. "In Review", "Ready for review") |
-| **Toolchain commands** | install / lint / test / build / dev invocations | Detect from package scripts + task runner; record `<install command>`, `<lint command>`, `<test command>`, `<build command>`, `<dev command>` |
+| **Toolchain commands** | install / lint / test / build / dev invocations | Detect from package scripts + task runner; record `<install command>`, `<lint command>`, `<test command>`, `<build command>`, `<dev command>`. When **both** package scripts and a task runner (Make/Nx/Turbo/…) exist, prefer the project's documented entrypoint (rules/AGENTS/contributing doc) — a bare script pick can skip orchestrated lint/coverage the runner bundles |
 | **Dev server URL/port** | Where the running app is served (and optional backend service + port) | Detect from dev-server config / framework defaults; record `<dev-server-port>`, and note any backend the dev target starts transitively and its port `<backend-port>` |
-| **Default branch** | Base branch for worktrees | Detect (`git symbolic-ref refs/remotes/origin/HEAD`, or fall back to `main`/`master`) |
+| **Default branch** | Base branch for worktrees | Detect via `git remote show origin` (the `HEAD branch:` line), else whichever of `main`/`master` exists. Don't rely on `git symbolic-ref refs/remotes/origin/HEAD` — it's unset on many fresh clones (errors / returns nothing) |
 | **Worktree root** | Parent dir for per-ticket worktrees | Ask/default to a sibling dir (e.g. `../<repo>-worktrees/`) |
 | **Branch convention** | Branch-name template — must embed the ticket id | Ask/detect; default `<prefix>_<ticket-id>_<slug>`; the embedded ticket id lets the PR step recover it |
 | **PR conventions** | Target repo, reviewers, labels, title prefix | Detect repo from the git remote; ask/detect reviewer-selection rule, label set, and ticket-id title prefix (any may be none). The reviewer-selection rule must exclude the PR owner from reviewing their own PR (e.g. pick the other member of a fixed reviewer set) |
@@ -53,6 +53,8 @@ The current user's identity is **not** hardcoded — resolve it dynamically at t
 ### DTCG token systems
 
 When the theme/token row detects a **W3C DTCG-format design-token file system** (JSON leaves carrying `$value`/`$type`, usually with a token build tool like Style Dictionary / Terrazzo in devDependencies), resolve the DTCG-only settings and build the **token manifest** as described in **[references/dtcg-tokens.md](references/dtcg-tokens.md)**. Everything DTCG-specific in this skill — the manifest, the autonomous token-add procedure (Phase 4d), and the Phase 5 token-conformance check — is defined there and applies only when these settings were resolved.
+
+This machinery keys off the **project's** token system, not the design's. A DTCG *design* export mapped into a **non-DTCG** project (e.g. a component-library theme object or a CSS-variable token file) uses the project's own token mechanism via `DESIGN_TOKEN_MAP`/`TOKEN_CHANGES` and **skips** all of it — the manifest, 4d, and the token-conformance check.
 
 ---
 
@@ -360,13 +362,15 @@ done
 
 If the server is not responding after ~60 seconds (30 retries), kill the process and bail with the error. Common causes: port conflict, build error that lint/test didn't catch, or missing environment variables.
 
+**A bare 2xx/3xx is not proof the view rendered when it's behind auth.** An unauthenticated request to a protected route can return `200` on a login page or `3xx` to `/login` — passing this poll while the target view is still unreachable. If the route requires authentication, detect the auth redirect/login-page response here, and treat establishing a logged-in session (and ensuring any backend service the view needs is up) as a Phase 7a prerequisite, not satisfied by this poll. See references/design-validation-loop.md (7a).
+
 **6d. Store `DEV_SERVER_PID`** for cleanup in Phase 8.
 
 ### Phase 7 — Design validation loop (conditional, up to 3 rounds)
 
 This is the core frontend differentiator — visual fidelity against the design. **Skip it entirely when `DESIGN_VIEW` is `none`** (setup/foundation tickets; see Phase 1).
 
-**If a design-validation tool/skill is available** (resolved in Project configuration), invoke it with the Phase 1 parameters (`DESIGN_VALIDATION_PARAMS`: design file, app base URL + `APP_ROUTE`, design + app navigation, viewport, theme context(s), focus areas), parse its structured discrepancy report, fix `critical`/`major` issues, and re-run — exiting when **zero critical and zero major** discrepancies remain, capped at **3 rounds**. **If no tool is available**, degrade to a manual visual checklist (open the app route against the design view per `DESIGN_NAVIGATION`, fix obvious critical/major discrepancies), capped at the same 3 passes. Re-run lint/test between rounds (round 1 reuses the Phase 5 pass); the Phase 6 dev server must be up.
+**If a design-validation tool/skill is available** (resolved in Project configuration), invoke it with the Phase 1 parameters (`DESIGN_VALIDATION_PARAMS`: design file, app base URL + `APP_ROUTE`, design + app navigation, viewport, theme context(s), focus areas), parse its structured discrepancy report, fix `critical`/`major` issues, and re-run — exiting when **zero critical and zero major** discrepancies remain, capped at **3 rounds**. **If no tool is available**, degrade to browser-automation MCP primitives (navigate/screenshot/evaluate, e.g. Chrome-DevTools or Playwright MCP) against the design view, or to a manual visual checklist if none — fix obvious critical/major discrepancies, capped at the same 3 passes. Re-run lint/test between rounds (round 1 reuses the Phase 5 pass); the Phase 6 dev server must be up.
 
 The full per-round procedure is in **[references/design-validation-loop.md](references/design-validation-loop.md)** — the tool-invocation contract (7a), the report format + decision table (7b), fix guidance including `TOKEN_DRIFT` reverse-mapping (7c), the loop-control pseudocode (7d), the theme-context smoke/full handling, and the edge cases (7e).
 
@@ -395,7 +399,7 @@ This frees only the server *this run* started — consistent with Phase 6a's "do
 
 Run this from inside the worktree directory (you should already be `cd`'d there from Phase 4b).
 
-Open a change request (PR/MR) via the project's mechanism — the VCS CLI (`gh` for GitHub, `glab` for GitLab — note GitLab calls them Merge Requests via `glab mr create`, …) or the ticketing/VCS integration the project uses. If the project has a dedicated PR-creation skill, delegate to it rather than re-implementing commit/push/PR logic; otherwise drive the CLI directly. Honor the configured branch/reviewer/label conventions. Treat reviewers, labels, and a review-status transition as each "if the host supports it; otherwise omit." For a host with no change-request concept at all (push-only remote, email-patch flow), the terminal state is: push the branch and report the branch name + compare URL. The flow:
+Open a change request (PR/MR) via the project's mechanism — the VCS CLI (`gh` for GitHub, `glab` for GitLab — note GitLab calls them Merge Requests via `glab mr create`; `tea` for Forgejo/Gitea via `tea pr create`, …) or the ticketing/VCS integration the project uses. If the project has a dedicated PR-creation skill, delegate to it rather than re-implementing commit/push/PR logic; otherwise drive the CLI directly. Honor the configured branch/reviewer/label conventions. Treat reviewers, labels, and a review-status transition as each "if the host supports it; otherwise omit." For a host with no change-request concept at all (push-only remote, email-patch flow), the terminal state is: push the branch and report the branch name + compare URL. The flow:
 
 - Commit with the ticket-prefixed subject line (per the configured title-prefix pattern, if any)
 - Push the branch (the ticket id is recoverable from the branch name per Phase 4a)

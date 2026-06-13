@@ -26,6 +26,7 @@ The caller's prompt must include:
 - **App route** — the URL path in the running app (e.g., `/feed`, `/projects/123`); appended to the base URL.
 - **Design navigation instructions** — explicit steps to reach the target view in the design prototype (e.g., "click the Feed item in the sidebar"). The design uses client-side `useState` page switching, not URL routes. The skill does NOT auto-discover navigation.
 - **App navigation instructions** (optional) — additional steps beyond navigating to the route (e.g., "click the first project row to open the detail panel")
+- **Auth / login steps** (optional) — if the app requires an authenticated session to render the target route, the steps and credentials to establish it (e.g., "go to `/login`, fill email + password, submit"). Without this, an unauthenticated route may redirect to a login page instead of rendering the target view, and the capture compares the wrong screen. Like the other inputs, these come from the caller; the skill does not invent or discover them.
 - **Viewport** (optional) — width x height in pixels. Defaults to 1440x900.
 - **Focus areas** (optional) — narrow the comparison (e.g., "focus on typography and spacing only")
 
@@ -172,8 +173,11 @@ Steps:
 URL: ${app_base_url}${app_route}
 
 Steps:
+0. ${auth_login_steps — if the app needs an authenticated session (and/or a running backend) for this route, establish it FIRST, before navigating, so the route renders instead of redirecting to a login page. e.g., "goto the login route, fill the email and password fields from the snapshot refs, submit, and wait for the app shell." If no auth steps were provided, skip this step.}
+
 1. Navigate to the URL:
    playwright-cli -s=kargha-validate goto "${app_base_url}${app_route}"
+   If the page lands on a login screen instead of the target view, the session was not established — report APP_HEALTH: DEGRADED noting the auth redirect, and continue capturing what renders.
 
 2. Wait for the main content to be visible (the selector list is framework-agnostic — `#__next` is the Next.js example; `#root`, `#app`, etc. are covered by the `body > *` fallback):
    playwright-cli -s=kargha-validate run-code "async page => { for (const sel of ['main', '#__next > *', '#root > *', '#app > *', 'body > *']) { try { await page.waitForSelector(sel, { timeout: 5000 }); return; } catch {} } }"

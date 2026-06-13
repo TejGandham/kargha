@@ -34,7 +34,7 @@ Resolve each setting in this order: **explicit user input → detect from the re
 | **Icon libraries** | Primary icon source + optional fallbacks | Detect from deps/imports; may be none |
 | **Token/theme system** | The source of truth for colors / spacing / radius / typography / shadows | Detect: a theme object, CSS custom properties in a global stylesheet, a design-tokens file (incl. W3C DTCG JSON — resolve the extra settings in references/dtcg-tokens.md), a utility-class config, or plain CSS |
 | **Data layer** | The API the UI reads from | Detect: a GraphQL schema file, OpenAPI/REST types, generated TS client types; may be none |
-| **Project rules** | Component / data conventions the repo documents | Detect: contributor docs, lint configs, or rules files; cite them in tickets if present |
+| **Project rules** | Component / data conventions the repo documents | Detect: contributor docs, lint configs, or rules files; **verify the doc has real content before citing — a detected rules/design doc may be an unfilled template (placeholder headings, TODOs); cite only filled docs** |
 | **Toolchain commands** | lint / test / build invocations | Detect from package scripts and the repo's task runner (npm/pnpm/yarn scripts, Nx, Turborepo, Make, etc.) |
 | **Ticket destination** | Where tickets are emitted | Ask: a ticketing system (which one + how to call it) **or** plain files (output dir + `md`/`json`) — see Phase 0b |
 | **Design-validation** | Optional fidelity-check tool/skill | Use if the environment provides one (e.g., a skill that screenshots the running app and diffs it against the design); otherwise the design-validation loop becomes a manual checklist |
@@ -80,7 +80,7 @@ If no HTML found (or the supplied file path doesn't exist), bail with: "No desig
 
 **If a directory yields more than one candidate** (`echo "$candidates" | wc -l` > 1 — the normal multi-page case), do not silently pick the first: list the candidates and ask the user which export to plan from (batch this with the other Phase 0 questions). Anchoring every ticket on an arbitrary pick is worse than one question.
 
-**Format gate (the design-input contract).** After locating the HTML, confirm it is a supported runtime-JSX export: verify either `.jsx` siblings exist **or** the HTML contains a `<script type="text/babel">` block. If neither holds, bail with: "This HTML is not a supported runtime-JSX design export (no `.jsx` sources or `text/babel` script found). Supported: Claude Design-style JSX exports. Re-export in that format, or point me at the `.jsx` sources." Do not proceed to Phase 1 on an unsupported export — the analysis would silently mis-parse.
+**Format gate (the design-input contract).** After locating the HTML, confirm it is a supported runtime-JSX export: verify either `.jsx` siblings exist **or** the HTML contains a `<script type="text/babel">` block — including the **external-src** form `<script type="text/babel" src="...jsx">`, which points at a sibling `.jsx` instead of holding inline JSX. If neither holds, bail with: "This HTML is not a supported runtime-JSX design export (no `.jsx` sources or `text/babel` script found). Supported: Claude Design-style JSX exports. Re-export in that format, or point me at the `.jsx` sources." Do not proceed to Phase 1 on an unsupported export — the analysis would silently mis-parse.
 
 Also check for sibling source files — these are easier to parse than the monolithic HTML:
 
@@ -88,7 +88,7 @@ Also check for sibling source files — these are easier to parse than the monol
 - `combined.jsx` — all modules merged with `// ===== src/<file>.jsx =====` section markers
 - An extracted tokens stylesheet (e.g., `colors_and_type.css`)
 - `src/` subdirectory — split-out component files
-- A screenshots/`assets`/`uploads` directory, if present — record its path for the ticket's Design Reference; absent is fine (the template's Screenshots line is optional)
+- A screenshots/`assets`/`uploads` directory, if present — **check both the HTML's own dir and one level up** (exports commonly put screenshots in a sibling/parent `screenshots/` dir, not next to the HTML). Record its path for the ticket's Design Reference; absent is fine (the template's Screenshots line is optional)
 
 Prefer reading individual `.jsx` files when present. Fall back to `combined.jsx`, then the inline `<script type="text/babel">` in the standalone HTML. Throughout the rest of this skill, `<design_file>` refers to the resolved absolute HTML path computed here.
 
@@ -129,20 +129,20 @@ Report:
     App > Feed > [SignalCard > [Badge, Avatar, Icon], FilterChip]
     ```
 
-3. **Page/view inventory.** Every distinct "page" (typically from `page === '<id>'` conditionals or a client-side router):
+3. **Page/view inventory.** Every distinct "view" — a rendered state worth a slice. Often these come from `page === '<id>'` conditionals or a client-side router, but a single-screen export commonly drives views with `useState` **modes / panes / modals** instead (e.g. a read pane vs an edit pane, a settings pane, a confirm modal, a mobile-nav drawer). Treat each distinct rendered state as a view, whichever mechanism switches it:
     - Page ID (e.g., 'home', 'feed', 'projects')
     - Entry component name (e.g., `HomePage`, `Feed`, `ProjectsPipelinePage`)
     - Sub-views (e.g., projects has both pipeline and detail views)
     - Components used exclusively by this page vs shared across pages
 
-4. **Design token inventory (with values).** Every CSS custom property from `:root` and the tokens stylesheet — report each token *with its value*, not just counts/naming conventions (Phase 4a.2 must classify each design token as Direct/Close/No-match within ~2px / ~1 shade, which is impossible without the actual values):
+4. **Design token inventory (with values).** Every CSS custom property from `:root` and the tokens stylesheet — report each token *with its value*, not just counts/naming conventions (Phase 4a.2 must classify each design token as Direct/Close/No-match within ~2px / ~1 shade, which is impossible without the actual values). A hand-built design may tokenize **only some categories** (commonly colors + fonts, maybe one radius) and use **raw px/hex literals** for the rest (spacing, type sizes); report both — the defined tokens *and* the recurring raw literals (with the values and where they appear), so Phase 4a.2 can map the literals onto the project's scale or flag them as isolated/non-systematic values:
     - Colors: every custom property with its hex/rgb value (note the naming convention too, e.g. `--gray-25` … `--gray-950`)
     - Spacing: scale values
     - Typography: font families, size scale, weight scale
     - Radius: scale values
     - Shadows: elevation levels
     - Semantic tokens (e.g., `--bg-primary`, `--fg-primary`, `--border-primary`)
-    - **Theme contexts:** if the design defines alternate contexts (e.g. a `[data-theme="dark"]` / `.dark` block, or a separate dark stylesheet), report each token's value *per context*, not just `:root`. The implementation skill needs per-context values to author multi-context token additions correctly. Also report whether the design prototype can be *switched* into an alternate context at runtime (a theme-toggle component or `useState('theme'|'darkMode'|'colorScheme')`) — this decides whether a ticket can request a `full` second design-validation loop (needs a switchable prototype) or only the `smoke` check.
+    - **Theme contexts:** if the design defines alternate contexts (e.g. a `[data-theme="dark"]` / `.dark` block, or a separate dark stylesheet), report each token's value *per context*, not just `:root`. The implementation skill needs per-context values to author multi-context token additions correctly. Also report whether the design prototype can be *switched* into an alternate context at runtime (a theme-toggle component or `useState('theme'|'darkMode'|'colorScheme')`) — this decides whether a ticket can request a `full` second design-validation loop (needs a switchable prototype) or only the `smoke` check. This full-vs-smoke decision is recorded in the ticket-template's **Theme context(s)** line (references/ticket-template.md) and consumed by `kargha-build`'s design-validation step.
 
 5. **Mock data shapes.** For each top-level data constant (e.g., SIGNALS, PROJECTS, TEAM, CONTACTS), report the TypeScript-like shape of one item showing all fields and inferred types.
 
@@ -211,14 +211,16 @@ Spawn a third **Explore subagent** in parallel. (If the project has no data laye
 
 **Subagent brief:**
 
-Read the project's data layer — the GraphQL schema (e.g., a `schema.graphql`), OpenAPI/REST spec, or generated TS types — at `<schema>`. Also read the design's mock data structures from the design files at `<design_file>` (top-level `const` arrays like SIGNALS, PROJECTS, TEAM, CONTACTS, etc.). **If the project has no data layer**, document the data each design entity needs (entity name, fields, inferred types) — do not generate a mock layer and do not ask the user anything (this is a read-only Explore subagent; the main thread decides how to handle missing data in Phase 4d).
+Read the project's data layer — the GraphQL schema (e.g., a `schema.graphql`), OpenAPI/REST spec, or generated TS types — at `<schema>`. Also read the design's mock data structures from the design files at `<design_file>` (top-level `const` arrays like SIGNALS, PROJECTS, TEAM, CONTACTS, etc.). **When there is no single contract artifact** (a REST/FastAPI/tRPC app may not ship one), **reconstruct the contract by triangulating both sides**: the **client** (endpoint table + fetch call signatures + request/response usage) and the **server** (route handlers + their request/response types). Treat a loader/action data router (e.g. React Router loaders/actions, TanStack Router, Remix) as a **first-class fetch boundary**, not just component-level fetching — that's often where the real endpoints are wired. **If the project has no data layer**, document the data each design entity needs (entity name, fields, inferred types) — do not generate a mock layer and do not ask the user anything (this is a read-only Explore subagent; the main thread decides how to handle missing data in Phase 4d).
 
 Report:
 
-1. **Type coverage.** For each design data entity, map to the data layer's types:
-    - Fields in both the design mock and the schema (matched)
-    - Fields in the design mock with no schema equivalent (gaps)
-    - Schema fields not used by any design component (unused, for awareness)
+1. **Type coverage.** For each design data entity, map to the data layer's types using these buckets:
+    - **Matched** — fields in both the design mock and the schema
+    - **Gap** — fields in the design mock with no schema equivalent
+    - **Unused** — schema fields not used by any design component (for awareness)
+    - **Exists-but-differs** — present but semantically/format-mismatched (single-file export vs zip; list vs paginated cursor; epoch vs ISO timestamp; a value the client derives vs one the server stores)
+    - **Field-level gap on an existing entity** — a missing field on an entity that's otherwise present (note if the missing field spans multiple in-scope views)
 
 2. **Operation mapping.** For each page's data needs, which queries/endpoints serve them (e.g., a `searchSignals` query or a `GET /signals` endpoint for the feed; a `me`/`/me` for the current user).
 
@@ -317,11 +319,11 @@ Every icon used in the design must be mapped to a concrete icon import. Designs 
 
 #### 4a.2. Design token mapping (required step)
 
-**The project's token/theme system is the source of truth for all design tokens in the implementation.** The design's extracted CSS custom properties are a prototype artifact — they must NOT be copied verbatim into the app. Instead, every design token must be mapped back to a project token (theme key, CSS variable, or utility class).
+**The project's token/theme system is the source of truth for all design tokens in the implementation.** The design's extracted tokens — whatever form they take (CSS custom properties, or even a full DTCG token system the *design* itself ships) — are the **spec of intended values**, not the implementation mechanism; they must NOT be copied verbatim into the app. Every design token maps back to a project token (theme key, CSS variable, or utility class). **Don't conflate the design's token system with the project's:** the project side always decides the mechanism, and the two can differ in kind (a design can ship DTCG JSON while the build-target is a non-DTCG component-library theme object — a Vuetify / PrimeVue / MUI / Chakra theme — or a Tailwind/UnoCSS config, or vice versa). The DTCG-specific guidance below (tiers, Token Changes, `<token-build-command>`) is keyed to the *project's* token system; it does **not** apply when the project is non-DTCG, even if the design ships DTCG. Adopting the design's DTCG system into a non-DTCG project is a foundation decision to flag in 4c, not an assumption. See references/dtcg-tokens.md for the full asymmetry rules.
 
 **Process:**
 
-1. Read the project's token inventory from Phase 2: colors (with shades), spacing scale, radius scale, font sizes, line heights, shadows, and any custom/semantic tokens.
+1. Read the project's token inventory from Phase 2: colors (with shades), spacing scale, radius scale, font sizes, line heights, shadows, and any custom/semantic tokens. Map **what the design tokenized**; for categories the design left as **raw literals** (common in hand-built designs — read them directly from the design source, not the token inventory), map each recurring literal onto the project's scale (`16px` → the `md` spacing token) or, if it has no scale fit and isn't reused, flag it as a one-off to confirm with the user.
 
 2. For each design token category, map design values to project equivalents. The exact form depends on the token system (a theme prop, a CSS variable, or a utility class):
 
@@ -363,6 +365,8 @@ Parse the user's prompt against the page inventory from Phase 1. If ambiguous, u
 
 Also check: does the prompt mention related work already in progress? If so, note dependencies.
 
+**Architectural-reversal check.** While scoping, watch for design elements that **conflict with or reverse a deliberate existing architectural decision** — a pattern the app intentionally removed or replaced (the Phase 2 codebase survey, plus any architecture/decision docs the repo exposes, are the signal). Re-adding it is not a neutral implementation detail; surface it as an **explicit scope decision** via `AskUserQuestion` (implement as designed / keep the current architecture and adapt the design / descope), rather than silently planning the reversal.
+
 #### 4c. Foundation ticket (conditional)
 
 Check whether the component library + theme system are integrated in the frontend app (Phase 2, Part A, item 7):
@@ -386,12 +390,14 @@ For every data entity in the design that has no equivalent in the data layer, su
 
 Group related entities in a single question when practical.
 
+**Prototype-vs-target reconciliation.** Design prototypes are often **single-user, localStorage/in-memory mocks**; the build target may be **multi-user with real auth and server persistence**. Reconcile the *semantics*, not just field shapes: ownership/visibility (whose data is this?), concurrency, identity/auth, and persistence boundaries are gaps even when the data shape matches — surface them like other data-layer gaps. Also handle **interactive-but-dataless** features (e.g. a validation-only form, a calculator, a filter UI with no backing entity): these need no schema work — note them as such so they aren't mistaken for data gaps or blocked on backend work.
+
 #### 4e. Vertical slice boundaries
 
 Apply these heuristics:
 
 1. **Foundation slice** (only if needed per 4c): library/theme setup + design tokens + app shell
-2. **One slice per page/view** when the page has unique components
+2. **One slice per page/view** when the page has unique components. For a **one-page app** (no routes — views are `useState` modes/panes/modals), this heuristic gives nothing to split on; fall back to slicing by **mode/pane/component boundary** (e.g. a read-pane slice, an edit-pane slice, a settings-pane slice, the confirm modal bundled per heuristic 6)
 3. **Split list + detail** when both exist for an entity (e.g., Projects list vs Project detail)
 4. **Complex reusable components** get their own slice when >100 lines in design and used across pages
 5. **Cross-cutting features** (AI Assistant, Copilot, global search) are separate slices

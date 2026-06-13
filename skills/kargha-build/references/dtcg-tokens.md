@@ -2,6 +2,8 @@
 
 Loaded by `kargha-build` only when the project uses a W3C DTCG design-token system (resolved in the Project-configuration step). Everything DTCG-specific lives here: the settings + manifest, the autonomous token-add procedure, and the Phase 5 conformance check.
 
+**Trigger is the project's token system, not the design's.** A DTCG-format *design* export consumed by a **non-DTCG** project (a theme object, CSS custom properties, a utility-class config, plain CSS) uses that project's own token mechanism — apply `DESIGN_TOKEN_MAP`/`TOKEN_CHANGES` against it and skip this whole reference. None of the procedures below run unless the **project's** tokens are DTCG.
+
 ## Contents
 - DTCG token systems (settings + manifest)
 - Phase 4c-bis — Build the token manifest
