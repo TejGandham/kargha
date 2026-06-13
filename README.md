@@ -18,6 +18,7 @@ design HTML export
 
 ```
 kargha/
+  .claude-plugin/     plugin.json + marketplace.json   (plugin packaging)
   README.md
   skills/
     kargha-plan/      SKILL.md  +  references/{ticket-template.md, dtcg-tokens.md}
@@ -26,6 +27,19 @@ kargha/
 ```
 
 Each skill is a self-contained [canonical Agent Skill](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) — a directory whose `SKILL.md` carries the frontmatter (`name` + `description`) and the workflow. Heavy, conditionally-needed material (the ticket template, the DTCG token machinery) lives one level deep in `references/` and is loaded on demand, so the always-resident `SKILL.md` bodies stay lean.
+
+## Install (as a plugin)
+
+kargha ships as a self-contained Claude Code plugin + marketplace (the `.claude-plugin/` manifests). Add the marketplace and install — from the **public Forgejo** repo, which needs no auth:
+
+```bash
+/plugin marketplace add https://brahma.myth-gecko.ts.net:3000/stackhouse/kargha.git
+/plugin install kargha@kargha
+```
+
+This registers all three skills, namespaced under the plugin: `kargha:kargha-plan`, `kargha:kargha-build`, `kargha:kargha-validate`. (Pre-1.0: the names keep the `kargha-` prefix for parity with manual install; they may shorten to `kargha:plan` / `:build` / `:validate` at a stable release.)
+
+**Why Forgejo, not the GitHub mirror:** the repo is public on Forgejo but **private** on its GitHub mirror. A private GitHub repo works as a plugin source *only* for git-authenticated machines, and its background auto-updates need a `GITHUB_TOKEN`/`GH_TOKEN` (repo scope) in the environment or they fail silently — so the Forgejo public URL is the friction-free channel. (That Forgejo instance is tailnet-gated, so consumers must be on the Tailscale net.) The GitHub mirror stays a backup, not the install source.
 
 ## Install (manual)
 
@@ -41,7 +55,7 @@ cp -r skills/kargha-* ~/.claude/skills/
 cp -r skills/kargha-validate ~/.claude/skills/
 ```
 
-Use `<repo>/.claude/skills/` instead for project scope. The directory name is the skill name (`kargha-plan`, `kargha-build`, `kargha-validate`) under which Claude triggers it — the `kargha-` prefix groups them in the skills list and acts as the namespace. (If these are ever repackaged as a Claude Code plugin, the plugin supplies a `kargha:` namespace automatically and the prefix can be dropped.)
+Use `<repo>/.claude/skills/` instead for project scope. The directory name is the skill name (`kargha-plan`, `kargha-build`, `kargha-validate`) under which Claude triggers it — the `kargha-` prefix groups them in the skills list and acts as the namespace. (Packaged as a plugin too — see **Install (as a plugin)** above; under the plugin the skills namespace as `kargha:kargha-plan` etc.)
 
 ## The three skills
 

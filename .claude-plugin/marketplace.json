@@ -1,0 +1,25 @@
+{
+  "name": "kargha",
+  "description": "The kargha frontend skill pipeline — plan → build → validate.",
+  "owner": {
+    "name": "Tej Gandham",
+    "email": "tej@engen.tech"
+  },
+  "metadata": {
+    "description": "Stack-agnostic frontend skills: design-prototype export → vertical-slice tickets → implementation in a worktree → visual validation.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "kargha",
+      "description": "Frontend pipeline: plan vertical-slice tickets from a design export (kargha-plan), build one in an isolated git worktree and open a PR (kargha-build), and validate visual fidelity against the design prototype (kargha-validate). Resolves the project's stack up front; not tied to any framework, token system, data layer, or ticketing tool.",
+      "source": "./",
+      "strict": true,
+      "skills": [
+        "./skills/kargha-plan",
+        "./skills/kargha-build",
+        "./skills/kargha-validate"
+      ]
+    }
+  ]
+}
