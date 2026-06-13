@@ -31,7 +31,7 @@ Resolve each setting in this order: **explicit user input → detect from the re
 | **Frontend app dir** | Where components / routes / styles live, and its task-target name | Detect the package depending on the UI framework (a `package.json` with `react`/`next`/`vue`/`svelte`); in a monorepo pick the app the ticket targets; else ask |
 | **Component library** | UI-primitive library/libraries the project uses (0..n) and its installed path | Detect from `package.json` deps + existing imports; resolve the install path from the manifest; may legitimately be none |
 | **Icon libraries** | Primary icon source + optional fallbacks | Detect from deps/imports; may be none |
-| **Theme/token system** | Source of truth for colors / spacing / radius / typography / shadows | Detect: theme object, CSS custom properties, a design-tokens file, a utility-class config, or plain CSS |
+| **Theme/token system** | Source of truth for colors / spacing / radius / typography / shadows | Detect: theme object, CSS custom properties, a design-tokens file (incl. W3C DTCG JSON — see "DTCG token systems" below), a utility-class config, or plain CSS |
 | **Data layer** | The API the UI reads from, and how to detect operations in source | Detect: a GraphQL schema + codegen, OpenAPI/REST types, a tRPC router, generated TS client types; may be none. Note the detector `<data-layer-detector>` (e.g. files containing `graphql(`) and the generated-code directory `<generated-code-dir>` to exclude, both used in Phase 5b (a project with no codegen may have no `<generated-code-dir>`) |
 | **Ticketing system access** | Where the ticket lives and how to read/update it | Ask/detect: a ticketing system (which one + how to call it — MCP, CLI like `gh`/`glab`, REST) **or** a plain Markdown/JSON ticket file path — Phase 0a resolves the mode |
 | **Pickup statuses** | The set of statuses a ticket may be in to be picked up | Ask/detect; default to the project's first two backlog-ish states (e.g. "Backlog", "To Do"); for file tickets, the `status` front-matter field |
@@ -46,9 +46,26 @@ Resolve each setting in this order: **explicit user input → detect from the re
 | **Project rules** | Component-structure and data-layer convention docs | Detect: contributor docs, lint configs, or rules files; cite them during implementation/fixes if present, else fall back to inline generic conventions |
 | **Design-validation** | Optional fidelity-check tool/skill | Use if the environment provides one (a skill that screenshots the running app and diffs it against the design); otherwise Phase 7 becomes a manual checklist |
 
-Record the resolved values — every later phase references them. In this document, placeholders like `<frontend-app>`, `<component-lib>`, `<theme>`, `<lint command>`, `<dev command>`, `<dev-server-url>`, `<dev-server-port>`, `<backend-port>`, `<data-layer-detector>`, `<generated-code-dir>`, `<default-branch>`, `<ticket-id>`, `<pickup-statuses>`, `<in-progress-status>`, `<review-status>` refer to these resolved settings.
+Record the resolved values — every later phase references them. In this document, placeholders like `<frontend-app>`, `<component-lib>`, `<lint command>`, `<dev command>`, `<dev-server-url>`, `<dev-server-port>`, `<backend-port>`, `<data-layer-detector>`, `<generated-code-dir>`, `<default-branch>`, `<ticket-id>`, `<pickup-statuses>`, `<in-progress-status>`, `<review-status>` refer to these resolved settings.
 
 The current user's identity is **not** hardcoded — resolve it dynamically at the start of every run (Phase 0).
+
+### DTCG token systems (extra settings, resolved only when detected)
+
+When the theme/token row detects a **design-token file system in W3C DTCG format** (first stable spec 2025.10) — JSON files whose leaves carry `$value`/`$type`, usually alongside a token build tool in devDependencies (Style Dictionary, Terrazzo, Dispersa, …) and a build script — resolve these additional settings:
+
+| Setting | What it is | How to resolve |
+|-|-|-|
+| `<token-source-dir>` | The DTCG JSON files — the **only** editable token surface | Detect from the build script's `source` config or glob for `$value`-bearing JSON |
+| `<token-build-command>` | Regenerates platform artifacts from the JSON | Detect from package scripts (e.g. `build:tokens`) |
+| `<generated-token-artifacts>` | Build outputs (e.g. a generated `tokens.css`) — never hand-edit; excluded from the Phase 5 primitive/hardcode scans (checks 2–3), analogous to `<generated-code-dir>` | Detect from the build script's output path or a "GENERATED" file header |
+| Tier convention | Which tiers exist (primitive/semantic/component) and which one components may consume | Read the token dir's README/conventions doc; a common rule is "consume semantic, never primitives" — including documented **transitional-debt carve-outs** (legacy code consuming primitives) that must be tolerated where not touched |
+| Name-resolution rule | How a token path maps to the emitted variable name — often a vendor `$extensions` key (e.g. `$extensions["com.<project>.cssName"]`), falling back to path-derived names | Detect by scanning `$extensions` keys on a few tokens; the key is **project-specific — never assume a particular vendor key**. If ambiguous, confirm in the batched config `AskUserQuestion` |
+| Theme-context selector | How alternate contexts are activated (e.g. `[data-theme="dark"]`, a `.dark` class, `prefers-color-scheme`) | Detect from the build config's per-context selectors |
+
+**Token manifest (built in Phase 4 step 4c-bis, before any implementation lookup; rebuilt after any token edit).** Do **not** re-implement DTCG resolution (alias chains, composite serialization, multi-file merge order) — that is the token build tool's job and exactly where the bugs live. Instead, derive the manifest from the **generated artifacts**: run `<token-build-command>`, parse the generated output per context selector into `variable → resolved value → theme context`, then join the DTCG JSON for metadata only (token path, tier, resolved `$type` — walk ancestor groups for inherited types — and vendor name). This assumes the build emits **CSS custom properties** (the common case, and what the conformance check and `TOKEN_DRIFT` reverse-map consume). If `<token-build-command>` instead emits a JS theme object, a Tailwind config, or SCSS, adapt the parse to that output's name→value form per context; if that isn't practical, skip the manifest and the Phase 5 token-conformance check and fall back to the generic "no hardcoded values that duplicate tokens" rule, noting the reduced coverage in the PR body. The manifest serves three consumers: implementation lookups (Phase 4d), the token-conformance check (Phase 5), and reverse-mapping design-validation `TOKEN_DRIFT` from raw values to token paths (Phase 7). Also extract the **primitive-tier variable list** — the deny-list for new code. A stale manifest silently breaks all three consumers, so any re-run of `<token-build-command>` (e.g. after a Phase 4d token addition) re-derives it. If `<token-build-command>` fails, retry once; if it still fails, surface via `AskUserQuestion` before implementing (token-correct styling depends on it) or degrade explicitly to read-only parsing of the committed `<generated-token-artifacts>`, noting the limitation in the PR body.
+
+If the token dir carries DTCG **resolver-module** files (`*.resolver.json`), record their presence but do not branch on them — the skill runs the project's own build command, so it inherits resolver support whenever the project's toolchain ships it.
 
 ---
 
@@ -115,19 +132,26 @@ On failure, bail with the ticket id, current assignee, and `CURRENT_USER_EMAIL`.
 **Gate 3 — Frontend ticket validation.** Parse the description/body for the **"Design Reference"** section. This section must contain at minimum:
 
 - `**Design file:**` with a file path
-- `**View:**` with a view/page ID and navigation instructions
+- `**View:**` with a view/page ID and navigation instructions — or the literal `none` (optionally followed by an annotation, e.g. `\`none\` — setup ticket, design validation not applicable`) for a setup/foundation ticket (see below)
 
 If the Design Reference section is missing, bail with: "This ticket does not contain a Design Reference section. It was likely not planned by `plan-frontend-generic`. Use a non-frontend implementation skill/agent to implement it instead."
+
+When matching these field labels (here and in the extraction below), tolerate formatting variations — a ticketing system may have round-tripped the Markdown to rich text and back, turning `**Design file:**` into `*Design file:*`, `<b>Design file:</b>`, or plain `Design file:`. Match the label text case-insensitively, ignoring surrounding emphasis/markup; don't bail on a present-but-reformatted section.
+
+**Setup/foundation tickets.** `plan-frontend-generic` emits foundation/setup tickets (library + theme/token bootstrap, fonts) with `**View:** \`none\` — setup ticket, design validation not applicable`. These pass Gate 3 (the Design Reference section is present), but they have no view to validate: when `DESIGN_VIEW` resolves to `none`, **skip the design-validation loop (Phase 7) and its dev-server prerequisite (Phase 6)** — there is nothing to capture-and-compare — and don't fail the missing "Design validation passes" acceptance criterion. Implement, lint/test, run the token-conformance check, and open the PR. (A setup ticket may still touch the data layer and tokens, so Phases 5/5b still apply.)
 
 **Extract and cache** the following from the ticket description for use in later phases:
 
 - `DESIGN_FILE_PATH` — from the `**Design file:**` line
 - `DESIGN_VIEW` — view/page ID from the `**View:**` line: the backtick-delimited identifier before the em-dash separator (`plan-frontend-generic` emits `**View:** \`<page id>\` — <navigation>`). If it isn't backtick-delimited, take the page-id token between `**View:**` and the em-dash.
 - `DESIGN_NAVIGATION` — navigation instructions from the `**View:**` line (text after the `—`)
-- `APP_ROUTE` — derived from the "Route / Layout" section. Translate the route declaration into the served URL path in a framework-appropriate way. For file-based routers, derive the URL from the file path (e.g. a page file at `<frontend-app>/.../{{EXAMPLE_ROUTE}}/page.tsx` yields `/{{EXAMPLE_ROUTE}}`); for config-based routers, read the declared path.
+- `APP_ROUTE` — prefer the **`Served URL`** line in the "Route / Layout" section (`plan-frontend-generic` emits the concrete live path there); use it verbatim. Only if that line is absent, fall back to deriving the URL from the route declaration in a framework-appropriate way — file-based routers from the file path (e.g. a page at `<frontend-app>/.../{{EXAMPLE_ROUTE}}/page.tsx` yields `/{{EXAMPLE_ROUTE}}`), config-based routers from the declared path. If the derived path has a dynamic segment (`[id]`, `:id`), substitute a representative value from the design's mock data (e.g. `/projects/1`) — the health check and validator can't load a literal `[id]`.
 - `COMPONENT_LIBRARY_MAP` — the full "Component-to-Library Map" table (the binding contract for fidelity fixes)
+- `ICON_MAPPING` — the "Icon Mapping" table (design icon → Source → concrete import) and any "Missing Icons" list, if present. Implement icons with exactly these imports; for a Missing-Icons entry, add the custom SVG the plan flagged (don't silently substitute a different library icon)
+- `DESIGN_TOKEN_MAP` — the "Design Token Map" table (design token → project token, with tier), and the sibling `00-token-map.md` if the ticket cites one. This is the binding mapping for *existing* tokens — use it for token decisions rather than re-deriving the design→project mapping; `TOKEN_CHANGES` covers only the tokens to add. `TICKET_ID` — the ticket id (the reference/key in ticketing mode; the front-matter `id` in file-ticket mode), needed for the Phase 4a branch name
 - `ACCEPTANCE_CRITERIA` — the full "Acceptance Criteria" checklist
-- `DESIGN_VALIDATION_PARAMS` — the pre-authored design-validation invocation parameters (design file, app route, design navigation, focus areas), if present. `plan-frontend-generic` emits these under a "Design Validation Loop (if available)" heading inside "Verification", with the values under a "Validation parameters for this ticket:" sub-label — fuzzy-match on "Design Validation Loop" so the "(if available)" suffix doesn't break extraction
+- `DESIGN_VALIDATION_PARAMS` — the pre-authored design-validation invocation parameters (design file, app route, design navigation, **app navigation**, **viewport**, **theme context(s)**, focus areas), if present. `plan-frontend-generic` emits these under a "Design Validation Loop (if available)" heading inside "Verification", with the values under a "Validation parameters for this ticket:" sub-label — fuzzy-match on "Design Validation Loop" so the "(if available)" suffix doesn't break extraction. The optional `App navigation` (steps beyond the route to reach the view), `Viewport`, and `Theme context(s)` lines feed Phase 7a's invocation and the theme-context decision
+- `TOKEN_CHANGES` — the "Token Changes" section, if present: a table, one row per proposed token, with columns matching the plan's header exactly — **Token (path → var)**, **Op** (`add` = additive semantic / `add-primitive` / `mutate`), **Value — base / <context>** (alias `{group.token}` or literal), **Source file(s)** (in `<token-source-dir>`), **Covers**, and **Auth** (`autonomous` or `requires build-time confirmation`). This is the **pre-authorization** the Phase 4d tier-gated rule reads: an `add` row with `Auth: autonomous` and a supplied value is the "ticket's plan implies it" signal — apply it without re-asking. A row marked `requires build-time confirmation` (every `add-primitive`/`mutate`), a needed token with **no** row, or an absent section all route to `AskUserQuestion`
 
 ### Phase 2 — Sanity-check the plan and comments against the codebase
 
@@ -143,7 +167,8 @@ In file-ticket mode there are no remote comments; treat any inline "Notes"/"Upda
 
 **2b. Verify the plan against the codebase:**
 
-- **Do the referenced files/paths still exist?** Glob/Read each path the ticket lists — `plan-frontend-generic` emits a "Files to Create" section; also check any other file-list / critical-files sections the ticket happens to contain.
+- **Do the referenced/reused files still exist?** Glob/Read the paths the ticket cites as existing — reuse targets, critical-files, and any "depends on" file paths. (Do **not** existence-check the "Files to Create" section — those are new files that by definition don't exist yet; see the conflict check below.)
+- **Do "Files to Create" conflict with existing files?** For each path in the ticket's "Files to Create" section (which `plan-frontend-generic` emits), flag any that already exist with different content — a conflict to resolve, not the expected greenfield case.
 - **Do citations still resolve?** If the plan says "reuse `<some/shared/path>`", grep for it.
 - **Has the surrounding code drifted?** Confirm function signatures and data shapes match.
 
@@ -181,7 +206,7 @@ Always look transitions up dynamically — never hard-code transition ids.
 <prefix>_<ticket-id>_<kebab-slug-from-summary>
 ```
 
-Example: `<prefix>_{{EXAMPLE_TICKET}}_signal-feed-page`. Keep the slug short (~30 chars). The PR step re-extracts the ticket id from the branch name (e.g. via a regex matching the configured ticket-id pattern), so the id must remain literally present in the branch name.
+Example: `<prefix>_{{EXAMPLE_TICKET}}_signal-feed-page`. Keep the slug short (~30 chars). **Sanitize the slug** to `[a-zA-Z0-9_-]` only (the summary is untrusted input — e.g. a public issue title — and the branch/path are interpolated into shell commands; strip everything else, e.g. `tr -cd 'a-zA-Z0-9_-'`). The PR step re-extracts the ticket id from the branch name (e.g. via a regex matching the configured ticket-id pattern), so the id must remain literally present in the branch name.
 
 **4b. Create the worktree** from the default branch, into the configured worktree root:
 
@@ -197,12 +222,25 @@ If `git worktree add` fails because the branch or path already exists, don't clo
 
 **4c. Install dependencies.** Run `<install command>` in the worktree before any build/lint/test/dev commands — worktrees need their own dependency links.
 
+**4c-bis. Build the token manifest (DTCG token systems only).** Before any implementation lookup, run `<token-build-command>` and derive the token manifest per the "DTCG token systems" section (variable → resolved value → theme context, joined with the JSON for tier/path/name metadata; plus the primitive-tier deny-list). 4d, Phase 5's conformance check, and Phase 7's `TOKEN_DRIFT` reverse-map all read it. Skip this step when the project has no DTCG/tiered token system.
+
 **4d. Implement the plan's steps** in the worktree. Follow the ticket's "Component Plan" and "Files to Create" sections. Key rules:
 
 - Follow the project's component-structure conventions — cite the project's component-rules doc if one was resolved in Project configuration (e.g. PascalCase files, named exports, the project's styling approach, co-located test files); otherwise apply sensible inline conventions.
 - Follow the project's data-layer conventions — cite the project's data-layer-rules doc if one exists (e.g. fragment colocation, the project's preferred query hook, network-mocking for tests).
 - Use `<component-lib>` components per the `COMPONENT_LIBRARY_MAP` — do not rebuild primitives the library provides. (If there is no library, build the "custom" entries the map lists.)
-- All styling must reference the project's theme/token system — component props for library components, theme variables / utility classes in custom styles. Never hardcode hex colors or px values that duplicate what the token system already provides.
+- Use the exact icon imports from `ICON_MAPPING`; for each "Missing Icons" entry, add the custom SVG the plan flagged rather than substituting a different library icon.
+- All styling must reference the project's theme/token system — component props for library components, theme variables / utility classes in custom styles. Never hardcode hex colors or px values that duplicate what the token system already provides. Use `DESIGN_TOKEN_MAP` for which existing project token each design value maps to (don't re-derive the mapping the plan already made); `TOKEN_CHANGES` covers only tokens to add.
+- **DTCG token systems:** consume only the tier the project's convention allows (typically semantic, never primitives) — look variables up in the token manifest, not by grepping generated CSS. The only edit path for token values is the DTCG JSON in `<token-source-dir>` followed by `<token-build-command>` (then rebuild the manifest, and if a dev server is running verify it serves the regenerated values — many watchers hot-reload generated CSS; restart it if values are stale); never edit `<generated-token-artifacts>`. When the design needs a value with no token: prefer the nearest existing semantic token. Creating a new token is **tier-gated, and the autonomous case is exhaustive**: an *additive semantic-tier token* may be added autonomously when the ticket's plan implies it and the design supplies the value — aliasing an existing primitive when one matches, literal-valued otherwise. The plan signals this through the ticket's **`TOKEN_CHANGES`** section (extracted in Phase 1): an entry with operation `add`, tier semantic, a name, and per-context value(s) is pre-authorized — apply it without re-asking, mechanically:
+
+  0. **Idempotency preflight.** The same `add` row is carried in every ticket that consumes the token, so an earlier ticket may already have created it. Before adding, check `<token-source-dir>`/the manifest: if the token already exists with the same path, variable, and per-context values, it's a **no-op** (skip); if it exists but differs, **ask** (don't silently overwrite); only add when absent.
+  1. **Parse the Value cell.** Split the cell on ` / ` into segments and strip any trailing parenthetical annotation (`(literal)`, `(alias…)`) — those are informational. The first segment is the base value, each later segment is a `<context> <value>` override (e.g. `dark #1c2430`). Within a segment, `{group.token}` is an alias to that token path; a bare hex/dimension is a literal. Never write the `/`, a context label, or an annotation into the JSON value.
+  2. **Insert at the nesting the token path indicates** — `semantic.color.surface-info` goes under `semantic` → `color`, never at the JSON root (root insertion breaks the build tool's grouping/tier resolution). Ensure the token has a resolved `$type` (color/dimension/…): inherited from its group if that group declares one, else set `$type` explicitly on the new token.
+  3. **Name it to match the promised variable.** When the project's rule is a vendor `$extensions` cssName key, set that key to the promised name **without the leading `--`** — the build tool adds the prefix, so writing `--surface-info` yields `----surface-info`. When names are path-derived (no key), the token path must derive to the promised variable.
+  4. **For an alias, confirm context-stability against the manifest.** An alias inherits the aliased token's per-context resolution: if that token resolves to different values across the contexts the design needs (e.g. it's a primitive re-pointed in a transitional-debt dark block), the alias is **not** stable — emit explicit per-context overrides, or route to `AskUserQuestion`, rather than trusting it. The conformance check won't catch a wrong-but-non-empty dark value.
+  5. **Run `<token-build-command>`, rebuild the manifest, and verify it contains the exact promised variable.** If not, fix the cause (extension name, `--` prefix, nesting) and rebuild; for a path-derived name the plan mis-guessed, align the consuming component CSS to the actually-emitted variable and note the correction in the PR body. Never leave `var(--x)` resolving empty — lint, test, and the conformance check won't catch it.
+
+  Add the matching override for each theme context the entry lists, and note the addition in the PR body. If the project declares an alternate context (e.g. dark) but the row gives no override for a new **color or shadow** token, don't silently let it inherit the base value — confirm with `AskUserQuestion` that base-inheritance is intended (a light-only color usually looks wrong in dark and would still pass the non-empty smoke check). **Everything else asks**: a new primitive, a mutation of an existing `$value`, an ambiguous semantic name, a tierless token file (no semantic/primitive distinction to gate on), any `TOKEN_CHANGES` entry marked "requires build-time confirmation", or any touch of a documented transitional-debt block requires `AskUserQuestion`. A needed token with **no** `TOKEN_CHANGES` entry also falls here — ask rather than invent one.
 - Translate design mock data into the project's data layer (e.g. GraphQL queries with fragment colocation, REST calls, or typed-client calls per the resolved data layer).
 - Translate the design's client-side (`useState`) page navigation into the project's router (file-based or config-based routing).
 
@@ -221,9 +259,17 @@ These are the deterministic gates. If the project also defines a `typecheck`/`bu
 
 If any fails, fix the issues in the main thread (you own the code). Do not proceed to the dev server or design validation until they pass. If fixes take more than ~2 attempts, surface to the user via `AskUserQuestion`.
 
+**Token-conformance check (single pass — only when the DTCG token settings were resolved; see "DTCG token systems").** A non-DTCG token file has none of the inputs below — for those projects the generic "no hardcoded values that duplicate tokens" rule in Phase 4d is the only token check. Token violations are mechanical, so this is a deterministic scan folded into this phase — **not** a validation loop like 5b/7, and it never spawns a subagent. Two preconditions: (a) **stage new files first** (`git add -A` in the worktree) — newly created component files are untracked and won't appear in `git diff <default-branch>` otherwise, so checks 2–3 would silently skip them; (b) this check reads the **token manifest**, so it requires a **fresh** one — if `<token-build-command>` failed and the manifest is degraded/stale (Phase 4c-bis / 4d), **skip the check** and note `TOKEN_CONFORMANCE: skipped — manifest unavailable` in the PR body rather than scanning against stale state (which would mis-flag correctly-added tokens). Three checks, scoped to files changed relative to `<default-branch>` (checks 2–3 additionally exclude `<generated-token-artifacts>`, whose hunks legitimately contain primitive definitions and raw values):
+
+1. **Generated artifacts exactly reproducible, never hand-edited:** an artifact diff vs `<default-branch>` is *expected* whenever `<token-source-dir>` was edited through the sanctioned Phase 4d path — commit it. The violation is a **hand-edit**, detected as either an artifact change with no corresponding `<token-source-dir>` change, or artifact residue a rebuild doesn't reproduce: re-run `<token-build-command>` and require `<generated-token-artifacts>` to come out clean (no uncommitted residue). Revert hand-edits and route the change through the DTCG JSON instead.
+2. **No primitive-tier consumption in new code:** extract `var(--name)` references (and bare `--name` re-declarations) from added lines and compare by **string equality** against the manifest's primitive-tier list — never substring grep (legacy names as short as `--r` make substring matching unusable). In a theme-prop / utility-class system where components consume tokens by name rather than `var()` (e.g. `color="p600"`, `bg="n800"`), also compare added prop/class values against the primitive names (strip the `--`). Tolerate pre-existing primitive usage in lines the ticket didn't touch (documented transitional debt) — only added lines count.
+3. **No hardcoded token duplicates:** flag added color/dimension literals whose value matches a manifest entry; replace with the corresponding **consumable-tier (semantic)** variable. If the only manifest match is a primitive, do **not** swap in the primitive (that just trades a hardcode for a check-2 violation) — treat it as a "no semantic match" and route it through the Phase 4d token-creation rule. This check is best-effort (composite values and near-misses won't match exactly) — treat non-obvious hits as flags to review, not auto-fixes.
+
+Fix violations inline, re-run `<lint command>`, and move on — one pass, no rounds.
+
 ### Phase 5b — Data-layer conformance loop (conditional, up to 3 rounds)
 
-**This phase runs whenever the project has a data layer** (e.g. GraphQL with fragment colocation/codegen, or REST/OpenAPI/tRPC). **Skip this entire phase and jump to Phase 6 only when there is no data layer at all, or when no changed file contains a data operation** (computed in 5b-1). A missing conventions doc is **not** a skip trigger: when a data layer exists but no rules doc was resolved, still run the loop and fall back to the inline generic conformance check described in 5b-3.
+**This phase runs whenever the project has a data layer** (e.g. GraphQL with fragment colocation/codegen, or REST/OpenAPI/tRPC). **Skip this entire phase and jump to Phase 6 only when there is no data layer at all, or when no changed file contains a data operation** (computed in 5b-1). A missing conventions doc is **not** a skip trigger: when a data layer exists but no rules doc was resolved, still run the loop and fall back to the inline read-only pass described in 5b-3 (against whatever conventions the repo documents; if truly none, check only that data operations are typed — no `any` — and not duplicated, and note the thin coverage in the PR body).
 
 Validate that created or modified components follow the project's data-layer conventions (for GraphQL: fragment colocation, fragment/operation naming, imports per the project's GraphQL rules, query/mutation tier boundaries; for other layers: schema conformance, typed-client usage, etc.) before proceeding to the dev server and design validation.
 
@@ -232,10 +278,13 @@ Validate that created or modified components follow the project's data-layer con
 Only validate files that were created or modified in this ticket **and** contain data-layer operations. Skip this phase entirely if no files qualify. Use the resolved `<data-layer-detector>` from Project configuration — the literal `graphql(` below is just the GraphQL example; for REST/tRPC the detector is "files importing the client or calling the typed endpoints," etc. Anchor on the resolved detector, not the example token. Exclude generated code (the `<generated-code-dir>` resolved in Project configuration; drop that `grep -v` if the project has no generated-code directory) and test files.
 
 ```bash
+# Stage new files first so untracked, just-created files are included in the diff.
+git add -A
 # From the worktree, find changed source files relative to the default branch,
 # excluding generated code and tests, that contain data-layer operations.
+# The extension set should match the resolved framework's source files, not just React's.
 git diff --name-only "<default-branch>" -- '<frontend-app>/**' \
-  | grep -E '\.(tsx?|jsx?)$' \
+  | grep -E '\.(tsx?|jsx?|vue|svelte)$' \
   | grep -v '<generated-code-dir>' \
   | grep -v '\.test\.\|\.spec\.' \
   | while read f; do grep -l '<data-layer-detector>' "$f" 2>/dev/null; done \
@@ -312,7 +361,7 @@ The design-validation step requires the frontend app running at the configured d
 lsof -i :<dev-server-port> -t 2>/dev/null
 ```
 
-If something is already on the dev-server port, bail with a message asking the user to stop it first. Do NOT kill another process's dev server.
+If something is already on the dev-server port (or the backend port, when the dev target starts one), bail with a message asking the user to stop it first. Do NOT kill another process's dev server. (This guards against *other* processes — when an instruction elsewhere says to **restart** your own dev server, e.g. after a token rebuild or a degraded server in Phase 7e, first `kill $DEV_SERVER_PID` to free the port, then repeat these Phase 6 steps; otherwise this check sees your own still-running server and bails.)
 
 **6b. Start the dev server in the background:**
 
@@ -348,15 +397,19 @@ This is the core frontend differentiator. **If a design-validation tool/skill is
 
 #### 7a. Invoke the design-validation tool/skill
 
-Invoke the configured design-validation skill/tool. It is stack-agnostic: it takes a design-file path, an app URL/route, and navigation instructions, and returns a structured discrepancy report. Pass the parameters extracted from the ticket in Phase 1:
+Invoke the configured design-validation skill/tool. It is stack-agnostic: it takes a design-file path, an app URL/route, and navigation instructions, and returns a structured discrepancy report. Pass the parameters extracted from the ticket in Phase 1, including the optional fields from `DESIGN_VALIDATION_PARAMS` when present:
 
 ```
 Design file: <DESIGN_FILE_PATH>
 App route: <APP_ROUTE>  (served at <dev-server-url><APP_ROUTE>)
 Design navigation: <DESIGN_NAVIGATION>
+App navigation: <app-side steps to reach the view, from DESIGN_VALIDATION_PARAMS — pass when present; REQUIRED for slideout/modal/detail sub-views, else the tool only captures the route's initial render>
+Viewport: <from DESIGN_VALIDATION_PARAMS if specified, else the tool default>
 ```
 
-If the ticket's "Design Validation Loop" section includes pre-authored parameters (focus areas, specific viewport), use those instead of the raw extracted values. A well-built design-validation tool manages its own capture + comparison internals and any HTTP server it needs for the design file — invoke it and parse the returned report; do not replicate its internals.
+Prefer the pre-authored `DESIGN_VALIDATION_PARAMS` values (focus areas, app navigation, viewport, theme context) over the raw extracted ones. A well-built design-validation tool manages its own capture + comparison internals and any HTTP server it needs for the design file — invoke it and parse the returned report; do not replicate its internals.
+
+**Theme contexts (when the resolved theme/token system declares them).** Run the validation loop against the base context the ticket specifies (default: base/light). For an alternate context the ticket lists, the default is a cheap **smoke check** after the loop passes — this needs nothing from the design prototype. Concretely, activate the context the way the **resolved theme-context selector** demands — an attribute selector (`[data-theme="dark"]`) → `document.documentElement.setAttribute(...)`; a class (`.dark`) → toggle that class on the scope element; `prefers-color-scheme` → emulate the media (e.g. Chrome DevTools `Emulation.setEmulatedMedia`), since attribute/class mutation won't trigger it; or use the app's own toggle if it has one. Then confirm (a) the route still renders without console errors and (b) a few key theme variables resolve non-empty (read them on the element the selector scopes to, not always `documentElement`) — read them with `getComputedStyle(document.documentElement).getPropertyValue('--<var>')` for representative variables (surface, text, accent) and check none come back empty. An empty value means an alternate-context override is missing. Run a **full second validation loop** only when `DESIGN_VALIDATION_PARAMS` marks the context `full` **and** supplies design + app navigation that switches both into it: the design-validation tool compares against the design *as navigated* and has no theme input of its own, so without a switchable design prototype a "full" dark loop would compare a dark app against a light design and burn all three rounds. Absent the `full` marker and switch navigation, do the smoke check only.
 
 #### 7b. Parse the report and decide
 
@@ -395,6 +448,7 @@ When fixing discrepancies between rounds:
 - Address `critical` discrepancies first, then `major`
 - Use the `DESIGN` and `APP` values from the report to understand exactly what needs to change
 - Cross-reference the `COMPONENT_LIBRARY_MAP` from the ticket — fixes must use the correct `<component-lib>` components and the project's theme/token values
+- **DTCG token systems:** reverse-map **both sides** of each `TOKEN_DRIFT` entry through the token manifest before fixing — e.g. design `#f6f4ef` → `semantic.color.canvas`, app `#ffffff` → `semantic.color.surface`: the element consumes `--surface` where the design expects `--canvas`. That names the right consuming variable to swap, or reveals a missing token (which routes through the Phase 4d tier-gated creation rule — then rebuild tokens and the manifest before the next round)
 - After fixes, re-run `<lint command> && <test command>` before the next validation round — fixes must not break compilation
 
 #### 7d. Loop control
@@ -427,6 +481,8 @@ while round <= 3:
   round += 1
 ```
 
+This loop validates **one** context — the base context the ticket specifies, using the base Design/App navigation. The alternate-context handling from 7a wraps it: after this loop passes, run the cheap **smoke check** for any alternate context the ticket lists, and run this loop a **second time** (against the alternate context) only when `DESIGN_VALIDATION_PARAMS` marks that context `full`. For the second loop, append the params' **Context switch** steps to the navigation (the base navigation stays base-only, so the first loop really validated base); if no Context switch is supplied, the alternate context can't be switched — fall back to the smoke check. **Guard against regressions:** if a fix made during the alternate-context loop touches shared (non-context-specific) CSS, re-run one base-context verification round before opening the PR — a dark-mode fix can break light. The 3-round cap applies per loop invocation.
+
 #### 7e. Edge cases
 
 - **The design-validation tool crashes or times out:** Treat as a failed round. Retry once. If it fails again, skip design validation entirely and surface the error to the user — don't block the PR on a tooling failure.
@@ -439,13 +495,20 @@ while round <= 3:
 
 ```bash
 kill $DEV_SERVER_PID 2>/dev/null || true
-# Also clean up any orphaned processes on the dev-server port (and backend port if applicable).
-# lsof is the example mechanism — substitute ss/fuser/netstat where lsof isn't available.
-lsof -i :<dev-server-port> -t 2>/dev/null | xargs kill 2>/dev/null || true
-lsof -i :<backend-port> -t 2>/dev/null | xargs kill 2>/dev/null || true
+# Only if the port is STILL held after killing our own PID, clean up an orphan we spawned.
+# Guard the port-kill so it can't take out an unrelated process that happens to bind the port
+# (matches our dev command; lsof is the example mechanism — substitute ss/fuser/netstat).
+for pid in $(lsof -i :<dev-server-port> -t 2>/dev/null); do
+  ps -o command= -p "$pid" | grep -q "<dev command>" && kill "$pid" 2>/dev/null || true
+done
+# Same guard for the backend port — only kill a process the dev command spawned, never a
+# pre-existing shared backend/DB the user was already running on that port.
+for pid in $(lsof -i :<backend-port> -t 2>/dev/null); do
+  ps -o command= -p "$pid" | grep -q "<backend service command>" && kill "$pid" 2>/dev/null || true
+done
 ```
 
-If the skill exits before Phase 6 (e.g. at a gate in Phase 1), this phase is a no-op. If the project has no backend service, only the dev-server port needs freeing.
+This frees only the server *this run* started — consistent with Phase 6a's "do not kill another process's dev server." If the skill exits before Phase 6 (e.g. at a gate in Phase 1), this phase is a no-op. If the project has no backend service, only the dev-server port needs freeing.
 
 ### Phase 9 — Open the PR
 
@@ -478,7 +541,7 @@ Brief summary to the user (~8 lines):
 - **Worktree path** — so the user knows where the checkout lives for iterating on review feedback
 - **Data-layer validation summary:** passed/failed, rounds completed, residual issues (if any), or "skipped" (no qualifying files / no data layer)
 - **Design validation summary:** final STATUS, rounds completed, residual discrepancies (if any), or "manual checklist"
-- Acceptance criteria check summary
+- Acceptance criteria summary — a **self-assessment** from the automated gates (lint, test, token-conformance, design validation), not a full verification. Explicitly flag criteria nothing automatically checked (e.g. accessibility, "co-located test files exist") as needing manual review rather than implying they passed
 - If `AskUserQuestion` was used during the run, a one-liner noting what got decided
 
 Leave the worktree in place — PR review rounds frequently need it back.
@@ -506,6 +569,12 @@ Leave the worktree in place — PR review rounds frequently need it back.
 - **Kill the dev server on every exit path.** Whether the skill succeeds, fails at a gate, or errors after Phase 6, the dev-server port (and backend port, if any) must be freed. Structure cleanup to run on every exit path.
 - **Data-layer validation is conditional and scoped.** Run it only when the project has a data layer with conventions, and only against modified files containing data operations — never the whole source tree, and never generated code. Both the data-layer loop and the design loop are capped at 3 rounds.
 - **Warnings don't block.** Only Issues (clear rule violations) trigger fix-and-retry rounds. Warnings are informational.
+- **Generated token artifacts are read-only ground truth.** In a DTCG setup the generated CSS is what the manifest and conformance checks read — and the one thing never edited. The editable surface is the DTCG JSON; the bridge is `<token-build-command>`.
+- **Compare composite tokens as resolved CSS, never as JSON.** Shadows, typography, and font stacks are objects/arrays in DTCG source but strings in the build output; value comparisons against the JSON shape will always miss. The same goes the other way: token build tools can corrupt multi-layer arrays under naive deep-merge — another reason not to re-implement resolution.
+- **`$type` inherits from groups.** A per-token scan for `$type` misses tokens that inherit it from an ancestor group — read types through the manifest, not by spot-checking leaves.
+- **Vendor `$extensions` keys are project-specific.** The CSS-name extension (e.g. `com.<project>.cssName`) varies per project and may be absent (path-derived names). Detect, don't assume.
+- **Token edits don't reach the page by themselves.** After editing DTCG JSON, run `<token-build-command>`, rebuild the token manifest, and verify the dev server serves the regenerated values (many watchers hot-reload generated CSS; restart the server if values are stale) — otherwise Phase 7 validates against stale tokens.
+- **Transitional-debt blocks are read-only.** Documented legacy carve-outs (e.g. dark mode re-pointing primitives because old CSS consumes them directly) are tolerated where untouched and never "cleaned up" opportunistically — that's its own ticket.
 - **Don't re-enter plan mode.** The plan is already written and lives in the ticket. Your job is execution, not re-planning.
 - **`AskUserQuestion` is for real decisions**, not status updates. Don't interrupt the user to say "starting implementation now."
 - **The planning counterpart is `plan-frontend-generic`.** A ticket without a Design Reference section wasn't authored by it — route non-frontend tickets to a non-frontend implementation skill/agent.
