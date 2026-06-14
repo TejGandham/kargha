@@ -32,16 +32,14 @@ Each skill is a self-contained canonical Agent Skill — a directory whose `SKIL
 
 ## Install (as a Claude Code plugin)
 
-kargha ships as a self-contained Claude Code plugin + marketplace (the `.claude-plugin/` manifests). Add the marketplace and install — from the **public Forgejo** repo, which needs no auth:
+kargha ships as a self-contained Claude Code plugin + marketplace (the `.claude-plugin/` manifests). Add the marketplace and install — from the **public GitHub** repo, which needs no auth:
 
 ```bash
-/plugin marketplace add https://brahma.myth-gecko.ts.net:3000/stackhouse/kargha.git
+/plugin marketplace add https://github.com/TejGandham/kargha.git
 /plugin install kargha@kargha
 ```
 
 This registers all three skills, namespaced under the plugin: `kargha:kargha-plan`, `kargha:kargha-build`, `kargha:kargha-validate`. (Pre-1.0: the names keep the `kargha-` prefix for parity with manual install; they may shorten to `kargha:plan` / `:build` / `:validate` at a stable release.)
-
-**Why Forgejo, not the GitHub mirror:** the repo is public on Forgejo but **private** on its GitHub mirror. A private GitHub repo works as a plugin source *only* for git-authenticated machines, and its background auto-updates need a `GITHUB_TOKEN`/`GH_TOKEN` (repo scope) in the environment or they fail silently — so the Forgejo public URL is the friction-free channel. (That Forgejo instance is tailnet-gated, so consumers must be on the Tailscale net.) The GitHub mirror stays a backup, not the install source.
 
 ## Install (as a Codex plugin)
 
