@@ -62,7 +62,7 @@ Decision logic:
 | `STATUS: match`                                                          | Exit loop — validation passed                |
 | `STATUS: partial` with zero `critical` and zero `major` discrepancies    | Exit loop — good enough                      |
 | `STATUS: partial` or `mismatch` with `critical` or `major` discrepancies | Fix and re-run                               |
-| Round 3 reached with residual issues                                     | Stop — surface to user via `AskUserQuestion` |
+| Round 3 reached with residual issues                                     | Stop — surface to user via `AskUserQuestion` OR host user-input prompt |
 
 The "good enough" threshold: zero critical and zero major. Minor and cosmetic issues are acceptable — they can be addressed in PR review or follow-up tickets.
 
@@ -99,7 +99,7 @@ while round <= 3:
       break
 
   if round == 3:
-    surface residual discrepancies to user via AskUserQuestion
+    surface residual discrepancies to user via AskUserQuestion OR host user-input prompt
     break
 
   implement fixes based on report

@@ -18,7 +18,9 @@ design HTML export
 
 ```
 kargha/
-  .claude-plugin/     plugin.json + marketplace.json   (plugin packaging)
+  .claude-plugin/     plugin.json + marketplace.json   (Claude Code packaging)
+  .codex-plugin/      plugin.json                      (Codex packaging)
+  .agents/plugins/    marketplace.json                 (repo-local Codex marketplace)
   README.md
   skills/
     kargha-plan/      SKILL.md  +  references/{ticket-template.md, dtcg-tokens.md}
@@ -26,9 +28,9 @@ kargha/
     kargha-validate/  SKILL.md
 ```
 
-Each skill is a self-contained [canonical Agent Skill](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) — a directory whose `SKILL.md` carries the frontmatter (`name` + `description`) and the workflow. Heavy, conditionally-needed material (the ticket template, the DTCG token machinery) lives one level deep in `references/` and is loaded on demand, so the always-resident `SKILL.md` bodies stay lean.
+Each skill is a self-contained canonical Agent Skill — a directory whose `SKILL.md` carries the frontmatter (`name` + `description`) and the workflow. Heavy, conditionally-needed material (the ticket template, the DTCG token machinery) lives one level deep in `references/` and is loaded on demand, so the always-resident `SKILL.md` bodies stay lean.
 
-## Install (as a plugin)
+## Install (as a Claude Code plugin)
 
 kargha ships as a self-contained Claude Code plugin + marketplace (the `.claude-plugin/` manifests). Add the marketplace and install — from the **public Forgejo** repo, which needs no auth:
 
@@ -41,6 +43,41 @@ This registers all three skills, namespaced under the plugin: `kargha:kargha-pla
 
 **Why Forgejo, not the GitHub mirror:** the repo is public on Forgejo but **private** on its GitHub mirror. A private GitHub repo works as a plugin source *only* for git-authenticated machines, and its background auto-updates need a `GITHUB_TOKEN`/`GH_TOKEN` (repo scope) in the environment or they fail silently — so the Forgejo public URL is the friction-free channel. (That Forgejo instance is tailnet-gated, so consumers must be on the Tailscale net.) The GitHub mirror stays a backup, not the install source.
 
+## Install (as a Codex plugin)
+
+kargha also ships a Codex plugin manifest (`.codex-plugin/plugin.json`) and a Codex marketplace (`.agents/plugins/marketplace.json`) that reuse the same `skills/` directory.
+
+Codex installs plugins from configured marketplace snapshots. Add the kargha marketplace first, then install the plugin selector `kargha@kargha-local` (`kargha` is the plugin name; `kargha-local` is the marketplace name declared in `.agents/plugins/marketplace.json`).
+
+From the public Forgejo repo:
+
+```bash
+codex plugin marketplace add https://brahma.myth-gecko.ts.net:3000/stackhouse/kargha.git
+codex plugin add kargha@kargha-local
+```
+
+From an existing local checkout:
+
+```bash
+codex plugin marketplace add .
+codex plugin add kargha@kargha-local
+```
+
+Confirm Codex can see the marketplace and installed plugin:
+
+```bash
+codex plugin marketplace list
+codex plugin list --marketplace kargha-local
+```
+
+To refresh a Git-backed marketplace after this repo changes, run:
+
+```bash
+codex plugin marketplace upgrade kargha-local
+```
+
+This registers the same three skills for Codex from the shared `skills/` tree: `kargha:kargha-plan`, `kargha:kargha-build`, and `kargha:kargha-validate`.
+
 ## Install (manual)
 
 The three skills are **independent** — install all three for the full plan → build → validate loop, or just the one you need: `kargha-validate` is fully standalone, `kargha-build` works from any conforming ticket, and `kargha-plan` needs neither installed. No skill references another's files.
@@ -48,14 +85,18 @@ The three skills are **independent** — install all three for the full plan →
 Copy the skill directory(ies) into your skills folder:
 
 ```bash
-# all three (personal scope)
+# all three for Claude Code (personal scope)
 cp -r skills/kargha-* ~/.claude/skills/
 
-# …or one at a time
+# all three for Codex (personal scope)
+cp -r skills/kargha-* ~/.agents/skills/
+
+# …or one at a time, for either host
 cp -r skills/kargha-validate ~/.claude/skills/
+cp -r skills/kargha-validate ~/.agents/skills/
 ```
 
-Use `<repo>/.claude/skills/` instead for project scope. The directory name is the skill name (`kargha-plan`, `kargha-build`, `kargha-validate`) under which Claude triggers it — the `kargha-` prefix groups them in the skills list and acts as the namespace. (Packaged as a plugin too — see **Install (as a plugin)** above; under the plugin the skills namespace as `kargha:kargha-plan` etc.)
+Use `<repo>/.claude/skills/` for Claude Code project scope OR `<repo>/.agents/skills/` for Codex repo scope. The directory name is the skill name (`kargha-plan`, `kargha-build`, `kargha-validate`) under which the host triggers it — the `kargha-` prefix groups them in the skills list and acts as the namespace. (Packaged as a plugin too — see the plugin install sections above; under the plugin the skills namespace as `kargha:kargha-plan` etc.)
 
 ## The three skills
 
@@ -77,7 +118,7 @@ Use `<repo>/.claude/skills/` instead for project scope. The directory name is th
 
 ### kargha-validate
 
-**Compares one running view against its design prototype** and reports structured discrepancies — it never fixes them; the caller decides what to act on. It uses two fresh-context subagents: a **capture** agent (drives `playwright-cli` to screenshot + snapshot both the design prototype and the live app) and a **comparison** agent (sees only the captured data, emits the report).
+**Compares one running view against its design prototype** and reports structured discrepancies — it never fixes them; the caller decides what to act on. It uses two fresh-context workers when available: a **capture** subagent OR host worker (drives `playwright-cli` to screenshot + snapshot both the design prototype and the live app) and a **comparison** subagent OR host worker (sees only the captured data, emits the report).
 
 - **In:** the design HTML file, the app base URL + route, design/app navigation instructions, optional viewport and focus areas.
 - **Out:** a structured report — `STATUS` (match/partial/mismatch), severity-rated `DISCREPANCIES` across layout/color/typography/spacing/components/hierarchy, `TOKEN_DRIFT`, and missing/extra elements.
@@ -104,7 +145,7 @@ Use `<repo>/.claude/skills/` instead for project scope. The directory name is th
 ## Cross-cutting concepts
 
 - **Stack-agnostic.** No skill assumes a specific component library, icon set, theme system, framework, data layer, ticketing system, or repo layout. Concrete tools shown in the docs (Style Dictionary, Next.js, JIRA, `playwright-cli`, `localhost:3000`, …) are **examples**, resolved per project.
-- **Design-input contract.** The design side assumes a **runtime-JSX HTML export** (a Claude Design-style prototype: `.jsx` sources or an inline `text/babel` script, `useState` view switching, inline styles). `kargha-plan` gates on this format; other export formats are out of scope.
+- **Design-input contract.** The design side assumes a **Claude Design OR runtime-JSX HTML export** (`.jsx` sources or an inline `text/babel` script, `useState` view switching, inline styles). `kargha-plan` gates on this format; other export formats are out of scope.
 - **W3C DTCG design tokens.** When the token system is in [W3C DTCG](https://www.designtokens.org/) format (2025.10), the skills map design tokens to the **consumable (semantic) tier only**, derive a token manifest from the generated CSS (never re-implementing DTCG resolution), and let `kargha-plan` author a **Token Changes** section that pre-authorizes `kargha-build` to create additive semantic tokens autonomously (a deterministic Phase 5 check enforces no primitive-tier consumption and no hand-edited generated artifacts). The DTCG-specific machinery lives in each skill's `references/dtcg-tokens.md`. Non-DTCG token systems use the generic "no hardcoded values that duplicate tokens" rule.
 - **Theme contexts.** Alternate contexts (e.g. dark mode) get a cheap render/empty-variable smoke check by default; a full second design-validation loop is opt-in and requires a switchable design prototype, reached through navigation.
 

@@ -24,7 +24,7 @@ Where this document shows a concrete tool, command, library, or status name, tre
 
 ## Project configuration (resolve once, up front)
 
-Resolve each setting in this order: **explicit user input → detect from the repo → ask the user** (batch all unknowns into a single `AskUserQuestion`). Do not prompt for things you can detect. **When detection conflicts with explicit user input or the project's documented/blessed stack, the stated stack wins — confirm it rather than asserting what's merely present** (a repo can be mid-migration, so a detected framework/library shows the *current* state, not the intended target).
+Resolve each setting in this order: **explicit user input → detect from the repo → ask the user** (batch all unknowns into a single `AskUserQuestion` OR host user-input prompt). Do not prompt for things you can detect. **When detection conflicts with explicit user input or the project's documented/blessed stack, the stated stack wins — confirm it rather than asserting what's merely present** (a repo can be mid-migration, so a detected framework/library shows the *current* state, not the intended target).
 
 | Setting | What it is | How to resolve |
 | ------- | ---------- | -------------- |
@@ -96,7 +96,7 @@ Resolve the ticket reference from the user. Depending on mode:
 - **Ticketing-system mode:** take the ticket id/key (or extract it from a ticket URL), then fetch the ticket with its description, comments, status, assignee, and type. Parse the response per that system's payload shape (e.g. JIRA nests fields under `fields`, with comments under `fields.comment.comments[]`; GitHub Issues returns `body`/`state`/`assignees`; Linear returns the issue node). Render the description/body as Markdown.
 - **File-ticket mode:** read the Markdown/JSON ticket file produced by `kargha-plan`. The "status"/assignee live in the front-matter (or top-level JSON fields); the body is the ticket description. There are no remote comments — any review notes live inline or in sibling files the ticket references.
 
-Three gates, **all must pass**. Any failing is an immediate hard stop — no `AskUserQuestion`, no "want me to continue anyway?", just report and exit.
+Three gates, **all must pass**. Any failing is an immediate hard stop — no `AskUserQuestion` OR host user-input prompt, no "want me to continue anyway?", just report and exit.
 
 **Gate 1 — Status.** The ticket's status/state must be in the configured **pickup-eligible set** `<pickup-statuses>` (e.g. exactly `"Backlog"` or `"To Do"`).
 
@@ -141,7 +141,7 @@ When matching these field labels (here and in the extraction below), tolerate fo
 - `TICKET_ID` — the ticket id (the reference/key in ticketing mode; the front-matter `id` in file-ticket mode), needed for the Phase 4a branch name
 - `ACCEPTANCE_CRITERIA` — the full "Acceptance Criteria" checklist
 - `DESIGN_VALIDATION_PARAMS` — the pre-authored design-validation invocation parameters (design file, app route, design navigation, **app navigation**, **viewport**, **theme context(s)**, focus areas), if present. `kargha-plan` emits these under a "Design Validation Loop (if available)" heading inside "Verification", with the values under a "Validation parameters for this ticket:" sub-label — fuzzy-match on "Design Validation Loop" so the "(if available)" suffix doesn't break extraction. The optional `App navigation` (steps beyond the route to reach the view), `Viewport`, and `Theme context(s)` lines feed Phase 7a's invocation and the theme-context decision
-- `TOKEN_CHANGES` — the "Token Changes" section, if present: a table, one row per proposed token, with columns matching the plan's header exactly — **Token (path → var)**, **Op** (`add` = additive semantic / `add-primitive` / `mutate`), **Value — base / <context>** (alias `{group.token}` or literal), **Source file(s)** (in `<token-source-dir>`), **Covers**, and **Auth** (`autonomous` or `requires build-time confirmation`). This is the **pre-authorization** the Phase 4d tier-gated rule reads: an `add` row with `Auth: autonomous` and a supplied value is the "ticket's plan implies it" signal — apply it without re-asking. A row marked `requires build-time confirmation` (every `add-primitive`/`mutate`), a needed token with **no** row, or an absent section all route to `AskUserQuestion`
+- `TOKEN_CHANGES` — the "Token Changes" section, if present: a table, one row per proposed token, with columns matching the plan's header exactly — **Token (path → var)**, **Op** (`add` = additive semantic / `add-primitive` / `mutate`), **Value — base / <context>** (alias `{group.token}` or literal), **Source file(s)** (in `<token-source-dir>`), **Covers**, and **Auth** (`autonomous` or `requires build-time confirmation`). This is the **pre-authorization** the Phase 4d tier-gated rule reads: an `add` row with `Auth: autonomous` and a supplied value is the "ticket's plan implies it" signal — apply it without re-asking. A row marked `requires build-time confirmation` (every `add-primitive`/`mutate`), a needed token with **no** row, or an absent section all route to `AskUserQuestion` OR the host user-input prompt
 
 ### Phase 2 — Sanity-check the plan and comments against the codebase
 
@@ -151,7 +151,7 @@ Read **both** the plan in the ticket description **and any comments/review notes
 
 - Bug fixes/corrections override the corresponding plan section
 - Additional requirements add to the implementation checklist
-- Unresolved questions get flagged via `AskUserQuestion`
+- Unresolved questions get flagged via `AskUserQuestion` OR the host user-input prompt
 
 In file-ticket mode there are no remote comments; treat any inline "Notes"/"Updates" the file contains the same way, then proceed.
 
@@ -168,7 +168,7 @@ In file-ticket mode there are no remote comments; treat any inline "Notes"/"Upda
 - **Component library spot-check.** Pick 2–3 entries from the `COMPONENT_LIBRARY_MAP` and verify the referenced `<component-lib>` components still exist at the library's installed path (resolved in Project configuration). Library updates since the ticket was filed could have renamed or removed components. If the library's components can't be enumerated at the installed path (minified/bundled/types-only, or a remote/CDN design system), spot-check via the library's exported type surface or import resolution instead, and treat the check as best-effort rather than a hard mismatch. (Skip if the project has no component library — the mapping's entries are all "custom".)
 - **Route conflict check.** Verify the route path from the plan doesn't already exist with conflicting content.
 
-If a mismatch is load-bearing, use `AskUserQuestion` to flag it. Minor drift gets silently adapted and noted in the PR body later.
+If a mismatch is load-bearing, use `AskUserQuestion` OR the host user-input prompt to flag it. Minor drift gets silently adapted and noted in the PR body later.
 
 ### Phase 3 — Pick up the ticket
 
@@ -238,9 +238,9 @@ Run from the worktree before attempting design validation. The code must compile
 
 These are the deterministic gates. If the project also defines a `typecheck`/`build` target, run it too. (Some projects have no standalone typecheck target — in that case lint + test are the gates.)
 
-If any fails, fix the issues in the main thread (you own the code). Do not proceed to the dev server or design validation until they pass. If fixes take more than ~2 attempts, surface to the user via `AskUserQuestion`.
+If any fails, fix the issues in the main thread (you own the code). Do not proceed to the dev server or design validation until they pass. If fixes take more than ~2 attempts, surface to the user via `AskUserQuestion` OR the host user-input prompt.
 
-**Token-conformance check (DTCG token systems only — single pass, folded into this phase, never a loop or subagent).** When the DTCG token settings were resolved, run the deterministic three-check scan (generated-artifact reproducibility; no primitive-tier consumption in new code; no hardcoded duplicates of existing tokens), scoped to files changed vs `<default-branch>`. Stage new files first (`git add -A`) and skip the check with a `TOKEN_CONFORMANCE: skipped — manifest unavailable` PR note if the manifest is stale. Full check definitions in **[references/dtcg-tokens.md](references/dtcg-tokens.md)** ("Token-conformance check"). Non-DTCG projects rely only on the generic "no hardcoded values that duplicate tokens" rule above.
+**Token-conformance check (DTCG token systems only — single pass, folded into this phase, never a loop or subagent OR host worker).** When the DTCG token settings were resolved, run the deterministic three-check scan (generated-artifact reproducibility; no primitive-tier consumption in new code; no hardcoded duplicates of existing tokens), scoped to files changed vs `<default-branch>`. Stage new files first (`git add -A`) and skip the check with a `TOKEN_CONFORMANCE: skipped — manifest unavailable` PR note if the manifest is stale. Full check definitions in **[references/dtcg-tokens.md](references/dtcg-tokens.md)** ("Token-conformance check"). Non-DTCG projects rely only on the generic "no hardcoded values that duplicate tokens" rule above.
 
 ### Phase 5b — Data-layer conformance loop (conditional, up to 3 rounds)
 
@@ -287,7 +287,7 @@ while round <= 3:
     break — validation passed
 
   if round == 3:
-    surface residual issues to user via AskUserQuestion
+    surface residual issues to user via AskUserQuestion OR host user-input prompt
     break
 
   implement fixes based on report
@@ -296,9 +296,9 @@ while round <= 3:
 
 #### 5b-3. Invoke the data-layer conformance validator
 
-Run a **read-only conformance check** scoped to the target file list from 5b-1. **Strongly prefer a separate read-only subagent so the check runs in an isolated context** — the implementer should not grade its own work. If the project provides a dedicated data-layer conformance validator (a subagent or skill — e.g. a GraphQL-conventions checker when the stack is GraphQL/Apollo, or the project's REST/OpenAPI/tRPC schema-conformance equivalent), use it. Pass it the file list and ask it to check each file against the project's data-layer rules.
+Run a **read-only conformance check** scoped to the target file list from 5b-1. **Strongly prefer a separate read-only subagent OR host worker so the check runs in an isolated context** — the implementer should not grade its own work. If the project provides a dedicated data-layer conformance validator (a subagent, host worker, or skill — e.g. a GraphQL-conventions checker when the stack is GraphQL/Apollo, or the project's REST/OpenAPI/tRPC schema-conformance equivalent), use it. Pass it the file list and ask it to check each file against the project's data-layer rules.
 
-Only when the environment provides no subagent/skill mechanism, fall back to an inline read-only pass against the project's data-layer-rules doc, noting that this loses context isolation (the implementer is reviewing its own output). Either way the validator must be **read-only** — it reports, it does not edit — and **MUST** return a per-file `STATUS: PASS | ISSUES_FOUND` line plus a summary containing an explicit issue count (e.g. `Issues found: N across M files`), so the loop can parse the exit condition deterministically.
+Only when the environment provides no subagent, host worker, OR skill mechanism, fall back to an inline read-only pass against the project's data-layer-rules doc, noting that this loses context isolation (the implementer is reviewing its own output). Either way the validator must be **read-only** — it reports, it does not edit — and **MUST** return a per-file `STATUS: PASS | ISSUES_FOUND` line plus a summary containing an explicit issue count (e.g. `Issues found: N across M files`), so the loop can parse the exit condition deterministically.
 
 #### 5b-4. Parse the report and decide
 
@@ -308,7 +308,7 @@ The report MUST include a per-file `STATUS: PASS | ISSUES_FOUND` line and a summ
 | ------------------------------------ | ------------------------------------------------------------ |
 | `Issues found: 0` (all files PASS)   | Exit loop — validation passed                                |
 | Issues found, round < 3              | Fix issues in the main thread, re-run lint/test, re-validate |
-| Round 3 reached with residual issues | Stop — surface to user via `AskUserQuestion`                 |
+| Round 3 reached with residual issues | Stop — surface to user via `AskUserQuestion` OR host user-input prompt |
 
 **Warnings are acceptable** — only Issues (clear rule violations) trigger fixes. Do not attempt to fix Warnings.
 
@@ -427,7 +427,7 @@ Brief summary to the user (~8 lines):
 - **Data-layer validation summary:** passed/failed, rounds completed, residual issues (if any), or "skipped" (no qualifying files / no data layer)
 - **Design validation summary:** final STATUS, rounds completed, residual discrepancies (if any), or "manual checklist"
 - Acceptance criteria summary — a **self-assessment** from the automated gates (lint, test, token-conformance, design validation), not a full verification. Explicitly flag criteria nothing automatically checked (e.g. accessibility, "co-located test files exist") as needing manual review rather than implying they passed
-- If `AskUserQuestion` was used during the run, a one-liner noting what got decided
+- If `AskUserQuestion` OR a host user-input prompt was used during the run, a one-liner noting what got decided
 
 Leave the worktree in place — PR review rounds frequently need it back.
 
@@ -447,7 +447,7 @@ Leave the worktree in place — PR review rounds frequently need it back.
 - **Port conflicts are the #1 failure mode.** Another dev server (or backend) on the configured port will silently cause failures. Always check before starting; never kill another process's server.
 - **The dev target may start a backend too.** If the project's dev command transitively starts a backend/API service, Phase 8 must kill both ports.
 - **Resolve the design file path against the worktree root**, not the main checkout. Design files typically live in the repo alongside the app code.
-- **Design validation is expensive.** Each round can spawn capture + comparison subagents plus a browser session. The 3-round cap is a mandatory cost control — don't exceed it.
+- **Design validation is expensive.** Each round can spawn capture + comparison subagents OR host workers plus a browser session. The 3-round cap is a mandatory cost control — don't exceed it.
 - **Always run lint/test before design validation.** If the code doesn't compile, the dev server serves a broken page and a whole validation round is wasted on a build error.
 - **Hit the actual app route in the health check, not just `/`.** Dev servers often compile/warm pages on demand; the root might respond while the specific route is still compiling.
 - **The Component-to-Library Map is the contract.** If design validation reports a component fidelity issue, check the map first — the implementation should use exactly the library components specified.
@@ -461,5 +461,5 @@ Leave the worktree in place — PR review rounds frequently need it back.
 - **Token edits don't reach the page by themselves.** After editing DTCG JSON, run `<token-build-command>`, rebuild the token manifest, and verify the dev server serves the regenerated values (many watchers hot-reload generated CSS; restart the server if values are stale) — otherwise Phase 7 validates against stale tokens.
 - **Transitional-debt blocks are read-only.** Documented legacy carve-outs (e.g. dark mode re-pointing primitives because old CSS consumes them directly) are tolerated where untouched and never "cleaned up" opportunistically — that's its own ticket.
 - **Don't re-enter plan mode.** The plan is already written and lives in the ticket. Your job is execution, not re-planning.
-- **`AskUserQuestion` is for real decisions**, not status updates. Don't interrupt the user to say "starting implementation now."
+- **`AskUserQuestion` OR host user-input prompt is for real decisions**, not status updates. Don't interrupt the user to say "starting implementation now."
 - **The planning counterpart is `kargha-plan`.** A ticket without a Design Reference section wasn't authored by it — route non-frontend tickets to a non-frontend implementation skill/agent.

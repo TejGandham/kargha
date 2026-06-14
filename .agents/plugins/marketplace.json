@@ -1,0 +1,20 @@
+{
+  "name": "kargha-local",
+  "interface": {
+    "displayName": "kargha local"
+  },
+  "plugins": [
+    {
+      "name": "kargha",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

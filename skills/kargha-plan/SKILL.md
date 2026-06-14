@@ -1,11 +1,11 @@
 ---
 name: kargha-plan
-description: Analyze a design HTML export (e.g., from Claude Design) and decompose it into vertical-slice tickets for frontend implementation. Reads the design's components, tokens, navigation, and mock data; maps design components to the project's component library, tokens to its theme/token system, icons to its icon libraries, and cross-references its data layer (GraphQL schema, REST types, or stubbed). Emits self-contained tickets into any ticketing system (JIRA, Linear, GitHub Issues, …) OR as plain Markdown/JSON files. Each ticket includes a component-to-library mapping so implementers know which library components to use. Invoke when the user has a design prototype and wants implementation tickets — trigger phrases include "plan the frontend for this design", "break this design into tickets", "create frontend tickets from this design", or "slice this design into implementation work".
+description: Analyze a Claude Design OR runtime-JSX design HTML export and decompose it into vertical-slice tickets for frontend implementation. Reads the design's components, tokens, navigation, and mock data; maps design components to the project's component library, tokens to its theme/token system, icons to its icon libraries, and cross-references its data layer (GraphQL schema, REST types, or stubbed). Emits self-contained tickets into any ticketing system (JIRA, Linear, GitHub Issues, …) OR as plain Markdown/JSON files. Each ticket includes a component-to-library mapping so implementers know which library components to use. Invoke when the user has a design prototype and wants implementation tickets — trigger phrases include "plan the frontend for this design", "break this design into tickets", "create frontend tickets from this design", or "slice this design into implementation work".
 ---
 
 
 
-Turn a design export (e.g., a Claude Design HTML export) into vertical-slice tickets for frontend implementation. Each ticket is self-contained and independently implementable by an implementation agent/skill or a human.
+Turn a Claude Design OR runtime-JSX design export into vertical-slice tickets for frontend implementation. Each ticket is self-contained and independently implementable by an implementation agent/skill or a human.
 
 The skill's core value is the **component-to-library mapping** — determining which design components map to the project's component library (and with which props/variants), which need thin wrappers, and which must be built custom. This mapping appears in every ticket.
 
@@ -21,11 +21,11 @@ This skill is stack-agnostic about the **project** side. It does **not** assume 
 
 Where this document shows a concrete tool or library, treat it as an **example**, not a requirement.
 
-**Design-input contract (the one thing this skill *does* assume).** The analysis path assumes the design is a **runtime-JSX HTML export** — a Claude Design-style export whose components are JSX (individual `.jsx` files, a `combined.jsx`, or an inline `<script type="text/babel">` block), with `useState`-driven view switching and inline styles. This is a precondition, not stack-agnosticism: a Vue/Svelte prototype, a Figma/Anima HTML export, or a plain static-HTML export will pass the "is it HTML" check and then silently mis-parse (empty component inventory, no detected views). Phase 0a gates on this format and bails with the supported-format list if it doesn't hold. Where the document states design facts ("the design uses `useState` navigation / inline styles / hardcoded mock data"), read them as properties of this supported export format.
+**Design-input contract (the one thing this skill *does* assume).** The analysis path assumes the design is a **Claude Design OR runtime-JSX HTML export** whose components are JSX (individual `.jsx` files, a `combined.jsx`, or an inline `<script type="text/babel">` block), with `useState`-driven view switching and inline styles. This is a precondition, not stack-agnosticism: a Vue/Svelte prototype, a Figma/Anima HTML export, or a plain static-HTML export will pass the "is it HTML" check and then silently mis-parse (empty component inventory, no detected views). Phase 0a gates on this format and bails with the supported-format list if it doesn't hold. Where the document states design facts ("the design uses `useState` navigation / inline styles / hardcoded mock data"), read them as properties of this supported export format.
 
 ## Project configuration (resolve once, up front)
 
-Resolve each setting in this order: **explicit user input → detect from the repo → ask the user** (batch all unknowns into a single `AskUserQuestion`). Do not prompt for things you can detect. **When detection conflicts with explicit user input or the project's documented/blessed stack, the stated stack wins — confirm it rather than asserting what's merely present** (a repo can be mid-migration, so a detected framework/library shows the *current* state, not the intended target).
+Resolve each setting in this order: **explicit user input → detect from the repo → ask the user** (batch all unknowns into a single `AskUserQuestion` OR the host's equivalent user-input prompt). Do not prompt for things you can detect. **When detection conflicts with explicit user input or the project's documented/blessed stack, the stated stack wins — confirm it rather than asserting what's merely present** (a repo can be mid-migration, so a detected framework/library shows the *current* state, not the intended target).
 
 | Setting | What it is | How to resolve |
 | ------- | ---------- | -------------- |
@@ -49,7 +49,7 @@ When the **Token/theme system** is a W3C DTCG design-token file (JSON leaves car
 
 ### Phase 0 — Collect and validate inputs (hard gates)
 
-Required inputs. If any is missing, use `AskUserQuestion` once to collect all missing values simultaneously (combine with any unresolved Project configuration questions).
+Required inputs. If any is missing, ask the user once (`AskUserQuestion` OR the host's equivalent user-input prompt) to collect all missing values simultaneously (combine with any unresolved Project configuration questions).
 
 **0a. Design path.** The user must provide a path to the design HTML or its parent directory. Resolve it:
 
@@ -80,7 +80,7 @@ If no HTML found (or the supplied file path doesn't exist), bail with: "No desig
 
 **If a directory yields more than one candidate** (`echo "$candidates" | wc -l` > 1 — the normal multi-page case), do not silently pick the first: list the candidates and ask the user which export to plan from (batch this with the other Phase 0 questions). Anchoring every ticket on an arbitrary pick is worse than one question.
 
-**Format gate (the design-input contract).** After locating the HTML, confirm it is a supported runtime-JSX export: verify either `.jsx` siblings exist **or** the HTML contains a `<script type="text/babel">` block — including the **external-src** form `<script type="text/babel" src="...jsx">`, which points at a sibling `.jsx` instead of holding inline JSX. If neither holds, bail with: "This HTML is not a supported runtime-JSX design export (no `.jsx` sources or `text/babel` script found). Supported: Claude Design-style JSX exports. Re-export in that format, or point me at the `.jsx` sources." Do not proceed to Phase 1 on an unsupported export — the analysis would silently mis-parse.
+**Format gate (the design-input contract).** After locating the HTML, confirm it is a supported Claude Design OR runtime-JSX export: verify either `.jsx` siblings exist **or** the HTML contains a `<script type="text/babel">` block — including the **external-src** form `<script type="text/babel" src="...jsx">`, which points at a sibling `.jsx` instead of holding inline JSX. If neither holds, bail with: "This HTML is not a supported Claude Design OR runtime-JSX design export (no `.jsx` sources or `text/babel` script found). Supported: Claude Design OR runtime-JSX JSX exports. Re-export in that format, or point me at the `.jsx` sources." Do not proceed to Phase 1 on an unsupported export — the analysis would silently mis-parse.
 
 Also check for sibling source files — these are easier to parse than the monolithic HTML:
 
@@ -107,7 +107,7 @@ Prefer reading individual `.jsx` files when present. Fall back to `combined.jsx`
 
 ### Phase 1 — Analyze design structure (Explore subagent)
 
-Spawn an **Explore subagent** to read the design HTML and all sibling source files.
+Use an **Explore/explorer subagent** OR an inline read-only pass to read the design HTML and all sibling source files.
 
 **Subagent brief:**
 
@@ -154,7 +154,7 @@ Report with exact `file:line` citations.
 
 ### Phase 2 — Inventory codebase + component library (Explore subagent, parallel with Phase 1)
 
-Spawn a second **Explore subagent** in parallel.
+Use a second **Explore/explorer subagent** in parallel OR do this as a separate inline read-only pass.
 
 **Subagent brief:**
 
@@ -207,11 +207,11 @@ Report with `file:line` citations.
 
 ### Phase 3 — Map data needs to the data layer (Explore subagent, parallel with Phases 1-2)
 
-Spawn a third **Explore subagent** in parallel. (If the project has no data layer yet, this phase instead documents the data each design entity needs, to be stubbed until a backend exists.)
+Use a third **Explore/explorer subagent** in parallel OR do this as a separate inline read-only pass. (If the project has no data layer yet, this phase instead documents the data each design entity needs, to be stubbed until a backend exists.)
 
 **Subagent brief:**
 
-Read the project's data layer — the GraphQL schema (e.g., a `schema.graphql`), OpenAPI/REST spec, or generated TS types — at `<schema>`. Also read the design's mock data structures from the design files at `<design_file>` (top-level `const` arrays like SIGNALS, PROJECTS, TEAM, CONTACTS, etc.). **When there is no single contract artifact** (a REST/FastAPI/tRPC app may not ship one), **reconstruct the contract by triangulating both sides**: the **client** (endpoint table + fetch call signatures + request/response usage) and the **server** (route handlers + their request/response types). Treat a loader/action data router (e.g. React Router loaders/actions, TanStack Router, Remix) as a **first-class fetch boundary**, not just component-level fetching — that's often where the real endpoints are wired. **If the project has no data layer**, document the data each design entity needs (entity name, fields, inferred types) — do not generate a mock layer and do not ask the user anything (this is a read-only Explore subagent; the main thread decides how to handle missing data in Phase 4d).
+Read the project's data layer — the GraphQL schema (e.g., a `schema.graphql`), OpenAPI/REST spec, or generated TS types — at `<schema>`. Also read the design's mock data structures from the design files at `<design_file>` (top-level `const` arrays like SIGNALS, PROJECTS, TEAM, CONTACTS, etc.). **When there is no single contract artifact** (a REST/FastAPI/tRPC app may not ship one), **reconstruct the contract by triangulating both sides**: the **client** (endpoint table + fetch call signatures + request/response usage) and the **server** (route handlers + their request/response types). Treat a loader/action data router (e.g. React Router loaders/actions, TanStack Router, Remix) as a **first-class fetch boundary**, not just component-level fetching — that's often where the real endpoints are wired. **If the project has no data layer**, document the data each design entity needs (entity name, fields, inferred types) — do not generate a mock layer and do not ask the user anything (this is a read-only Explore subagent OR inline read-only pass; the main thread decides how to handle missing data in Phase 4d).
 
 Report:
 
@@ -229,7 +229,7 @@ Report:
     - Which pages depend on it
     - Approximate field count
 
-4. **Fetch-boundary planning.** Derive the containment relationships yourself from the design files (this subagent runs in parallel with Phase 1 and does not receive its hierarchy tree), then report which components own data fetching / fragments (those directly consuming entity data) vs purely presentational. If the stack uses GraphQL fragment colocation, note which components would own fragments. Phase 4 reconciles this against Phase 1's full hierarchy.
+4. **Fetch-boundary planning.** Derive the containment relationships yourself from the design files (this subagent OR inline pass runs in parallel with Phase 1 and does not receive its hierarchy tree), then report which components own data fetching / fragments (those directly consuming entity data) vs purely presentational. If the stack uses GraphQL fragment colocation, note which components would own fragments. Phase 4 reconciles this against Phase 1's full hierarchy.
 
 Report with `file:line` citations.
 
@@ -237,9 +237,9 @@ Report with `file:line` citations.
 
 ### Phase 4 — Synthesize and scope (main thread)
 
-Do this yourself — do not delegate. Read all three subagent reports, then work the steps below.
+Do this yourself — do not delegate. Read all three subagent OR inline-pass reports, then work the steps below.
 
-**Ask ordering and batching.** The steps below surface several `AskUserQuestion` points (4a.1 icon gaps, 4a.2 step 5 token mismatches, 4d data-layer gaps). Resolve **scope first** (4b), then batch the icon-gap, token-mismatch, and data-gap questions for the *in-scope* pages into as few `AskUserQuestion` calls as practical — don't interrupt the user about gaps on pages they're about to exclude, and don't ask four separate times when one batched question works. These decisions must be made in Phase 4 (Phase 5 drafts the tickets — incl. the Token Changes section — from them), so they cannot be deferred to the Phase 6 approval; only their *reporting* lands there (the coverage block). Do the mapping work of 4a/4a.1/4a.2 first, but defer their user-facing questions until after 4b.
+**Ask ordering and batching.** The steps below surface several `AskUserQuestion` OR host user-input prompt points (4a.1 icon gaps, 4a.2 step 5 token mismatches, 4d data-layer gaps). Resolve **scope first** (4b), then batch the icon-gap, token-mismatch, and data-gap questions for the *in-scope* pages into as few `AskUserQuestion` OR host user-input prompt calls as practical — don't interrupt the user about gaps on pages they're about to exclude, and don't ask four separate times when one batched question works. These decisions must be made in Phase 4 (Phase 5 drafts the tickets — incl. the Token Changes section — from them), so they cannot be deferred to the Phase 6 approval; only their *reporting* lands there (the coverage block). Do the mapping work of 4a/4a.1/4a.2 first, but defer their user-facing questions until after 4b.
 
 #### 4a. Component-to-library mapping (critical step)
 
@@ -315,7 +315,7 @@ Every icon used in the design must be mapped to a concrete icon import. Designs 
 
 4. **When no library has a match:** Flag it prominently in the ticket under a "Missing Icons" warning section. List each missing icon with its design usage context. The implementer will need a custom SVG. Do NOT silently plan custom SVGs without calling this out — the user needs to know which icons are gaps.
 
-**Report to user:** After completing the icon mapping, surface any gaps via `AskUserQuestion` or in the Phase 6 approval message's coverage summary (the prose block beneath the table — see Phase 6). Example: "10 of 12 design icons mapped (8 primary, 2 fallback); 2 require custom SVGs: `kanban`, `drag-handle`."
+**Report to user:** After completing the icon mapping, surface any gaps via `AskUserQuestion` OR the host user-input prompt, or in the Phase 6 approval message's coverage summary (the prose block beneath the table — see Phase 6). Example: "10 of 12 design icons mapped (8 primary, 2 fallback); 2 require custom SVGs: `kanban`, `drag-handle`."
 
 #### 4a.2. Design token mapping (required step)
 
@@ -347,7 +347,7 @@ Every icon used in the design must be mapped to a concrete icon import. Designs 
 
 4. Include a **Design Token Map** section in the foundation ticket (or the first ticket if no foundation ticket — see Phase 4c for which case applies). So that page tickets stay self-contained (the implementation skill reads one ticket file at a time, and this skill guarantees — see the intro and Phase 4e — that any unblocked ticket is independently implementable), do **not** make later tickets depend on reading the foundation ticket. Instead, in Mode B write the full map once as a sibling artifact `00-token-map.md` and have each ticket's Design Token Map line cite it by path *and* carry the slim subset of tokens that ticket actually uses; in Mode A, carry the slim per-ticket subset inline. Any token the ticket proposes to add goes in that ticket's **Token Changes** section (see the Token Changes section in references/ticket-template.md), not only the foundation ticket.
 
-5. **When tokens don't map:** Use `AskUserQuestion` to surface mismatches before filing tickets, and **record the user's decision in the ticket's Token Changes section** so the implementation skill can act on it without re-asking. For a tiered (DTCG) system, frame the options in the implementation skill's vocabulary:
+5. **When tokens don't map:** Use `AskUserQuestion` OR the host user-input prompt to surface mismatches before filing tickets, and **record the user's decision in the ticket's Token Changes section** so the implementation skill can act on it without re-asking. For a tiered (DTCG) system, frame the options in the implementation skill's vocabulary:
     - **(a) Use the nearest existing token in the consumable tier** (note the delta in the ticket).
     - **(b) Add an additive semantic-tier token** — alias to a named existing primitive when one matches, else a literal value; record per theme context. Do **not** alias a primitive that sits in a documented transitional-debt block (per the token dir's README/conventions) — it's re-pointed per context and the alias would resolve wrong; use a literal (with explicit per-context values) instead. This is the one option the build skill can apply autonomously, so record it as pre-authorization (token name, tier, alias-or-literal, per-context values, target source file).
     - **(c) Adjust the design** to use an existing token.
@@ -359,13 +359,13 @@ Every icon used in the design must be mapped to a concrete icon import. Designs 
 
 #### 4b. Scope the work
 
-Parse the user's prompt against the page inventory from Phase 1. If ambiguous, use `AskUserQuestion`:
+Parse the user's prompt against the page inventory from Phase 1. If ambiguous, use `AskUserQuestion` OR the host user-input prompt:
 
 > "The design contains these pages: [list]. Which ones should I plan tickets for?"
 
 Also check: does the prompt mention related work already in progress? If so, note dependencies.
 
-**Architectural-reversal check.** While scoping, watch for design elements that **conflict with or reverse a deliberate existing architectural decision** — a pattern the app intentionally removed or replaced (the Phase 2 codebase survey, plus any architecture/decision docs the repo exposes, are the signal). Re-adding it is not a neutral implementation detail; surface it as an **explicit scope decision** via `AskUserQuestion` (implement as designed / keep the current architecture and adapt the design / descope), rather than silently planning the reversal.
+**Architectural-reversal check.** While scoping, watch for design elements that **conflict with or reverse a deliberate existing architectural decision** — a pattern the app intentionally removed or replaced (the Phase 2 codebase survey, plus any architecture/decision docs the repo exposes, are the signal). Re-adding it is not a neutral implementation detail; surface it as an **explicit scope decision** via `AskUserQuestion` OR the host user-input prompt (implement as designed / keep the current architecture and adapt the design / descope), rather than silently planning the reversal.
 
 #### 4c. Foundation ticket (conditional)
 
@@ -381,7 +381,7 @@ Also check whether shared app chrome (Sidebar, TopBar, root layout) exists. If n
 
 #### 4d. Data-layer gaps (always ask)
 
-For every data entity in the design that has no equivalent in the data layer, surface it to the user via `AskUserQuestion`. Offer per-entity options:
+For every data entity in the design that has no equivalent in the data layer, surface it to the user via `AskUserQuestion` OR the host user-input prompt. Offer per-entity options:
 
 - **Stub data:** Plan the frontend with mocked data, note as blocked until backend work is done
 - **Exclude:** Skip pages that depend on this entity for now
@@ -424,7 +424,7 @@ For each identified vertical slice, draft a ticket description by copying the ca
 
 ### Phase 6 — Present plan and get approval
 
-Print the breakdown as normal output (the multi-row table is too wide for `AskUserQuestion` option labels), then use `AskUserQuestion` for the decision. Present this before emitting anything:
+Print the breakdown as normal output (the multi-row table is too wide for `AskUserQuestion` OR host user-input prompt option labels), then use `AskUserQuestion` OR the host user-input prompt for the decision. Present this before emitting anything:
 
 ```
 Here is the proposed ticket breakdown for <epic/group/dir>:
@@ -445,9 +445,9 @@ Coverage:
 - Tokens: X of Y mapped to the consumable tier; Z proposed as Token Changes
 ```
 
-This coverage block beneath the table is where 4a.1's icon-gap line and 4a.2's token-gap line land (their other channel is `AskUserQuestion`).
+This coverage block beneath the table is where 4a.1's icon-gap line and 4a.2's token-gap line land (their other channel is `AskUserQuestion` OR the host user-input prompt).
 
-Options (as the `AskUserQuestion`):
+Options (as the `AskUserQuestion` OR host user-input prompt):
 - "Proceed as planned"
 - "Adjust scope (merge/split/reorder)"
 - "Add more detail to a specific ticket"
@@ -538,13 +538,13 @@ Tell the user:
 
 ## Gotchas
 
-- **The design input must be a runtime-JSX export.** The whole analysis path assumes a Claude Design-style export (`.jsx` sources or a `text/babel` script, `useState` views, inline styles). Phase 0a gates on this; a Vue/Svelte/Figma/static-HTML export passes the "is it HTML" check and then silently mis-parses. The "design uses X" statements throughout (inline styles, `useState` navigation, hardcoded mock data) are properties of this supported format, not universal truths.
+- **The design input must be a Claude Design OR runtime-JSX export.** The whole analysis path assumes JSX sources (`.jsx` files or a `text/babel` script), `useState` views, and inline styles. Phase 0a gates on this; a Vue/Svelte/Figma/static-HTML export passes the "is it HTML" check and then silently mis-parses. The "design uses X" statements throughout (inline styles, `useState` navigation, hardcoded mock data) are properties of this supported format, not universal truths.
 - **Design uses inline React/Babel.** A standalone export's `<script type="text/babel">` block compiles JSX at runtime. Parse it as JSX source — it's standard React with `useState` for state and inline styles for layout.
 - **Individual `.jsx` files are preferred.** When present alongside the HTML, these are the split-out source modules — easier to parse, with logical grouping and comments. A `combined.jsx` merges them with `// ===== src/<file>.jsx =====` markers.
 - **The project's token system is the token authority.** It defines the canonical color palette, spacing scale, radius scale, shadows, and typography tokens. Design prototypes (the extracted tokens stylesheet) are approximations — do NOT copy them into the app. All implementation must use project tokens (props or variables/classes). When a design token doesn't map, flag it to the user and ask how to resolve it before emitting tickets.
 - **Tiered (DTCG) token systems have a consumable tier.** Map design tokens to the tier new code may consume (typically semantic, never primitives — shade ramps like `--p600` are primitives). A map that resolves a design value to a primitive shade sends the implementer straight into the build skill's deterministic primitive-deny check. Inventory tiers from the JSON source (not the generated CSS, which hides tier/path/`$extensions`/context), and route any needed-but-missing token through the ticket's Token Changes section (semantic, additive, per-context) so the build skill can add it without re-asking. Never hand-edit generated token artifacts; edit `<token-source-dir>` JSON and run `<token-build-command>`.
 - **Icons have a priority order.** Map every design icon to the primary icon library first; fall back to the configured secondary; only flag "custom SVG needed" when no configured library has a suitable icon — the user needs to decide how to handle those gaps.
-- **Don't delegate synthesis.** Phase 4 is the skill's highest-value step — cross-referencing design components, icons, and tokens against the library catalogs requires judgment. Do it yourself, don't farm it to a subagent.
+- **Don't delegate synthesis.** Phase 4 is the skill's highest-value step — cross-referencing design components, icons, and tokens against the library catalogs requires judgment. Do it yourself; don't farm it to a subagent OR separate worker.
 - **Mock data vs real data.** Design prototypes use hardcoded arrays (SIGNALS, PROJECTS, etc.). Tickets must translate these into the project's data layer (queries/fragments or REST calls) per the project's conventions.
 - **Design navigation vs the app router.** Designs use `useState('page')` for navigation. Implementation uses the project's router — each design "page" becomes a route.
 - **Ticketing is pluggable.** Resolve the destination up front (Phase 0b). Everything from approval (Phase 6) to emission (Phase 7) is the same regardless of backend; only the create/link calls differ. Plain-file mode needs no system access at all.
