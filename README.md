@@ -45,16 +45,38 @@ This registers all three skills, namespaced under the plugin: `kargha:kargha-pla
 
 ## Install (as a Codex plugin)
 
-kargha also ships a Codex plugin manifest (`.codex-plugin/plugin.json`) and a repo-local marketplace (`.agents/plugins/marketplace.json`) that reuse the same `skills/` directory.
+kargha also ships a Codex plugin manifest (`.codex-plugin/plugin.json`) and a Codex marketplace (`.agents/plugins/marketplace.json`) that reuse the same `skills/` directory.
 
-From this repo, add the marketplace root and install:
+Codex installs plugins from configured marketplace snapshots. Add the kargha marketplace first, then install the plugin selector `kargha@kargha-local` (`kargha` is the plugin name; `kargha-local` is the marketplace name declared in `.agents/plugins/marketplace.json`).
+
+From the public Forgejo repo:
+
+```bash
+codex plugin marketplace add https://brahma.myth-gecko.ts.net:3000/stackhouse/kargha.git
+codex plugin add kargha@kargha-local
+```
+
+From an existing local checkout:
 
 ```bash
 codex plugin marketplace add .
 codex plugin add kargha@kargha-local
 ```
 
-This registers the same three skills for Codex from the shared `skills/` tree.
+Confirm Codex can see the marketplace and installed plugin:
+
+```bash
+codex plugin marketplace list
+codex plugin list --marketplace kargha-local
+```
+
+To refresh a Git-backed marketplace after this repo changes, run:
+
+```bash
+codex plugin marketplace upgrade kargha-local
+```
+
+This registers the same three skills for Codex from the shared `skills/` tree: `kargha:kargha-plan`, `kargha:kargha-build`, and `kargha:kargha-validate`.
 
 ## Install (manual)
 
