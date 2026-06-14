@@ -30,7 +30,7 @@ kargha/
 
 Each skill is a self-contained canonical Agent Skill — a directory whose `SKILL.md` carries the frontmatter (`name` + `description`) and the workflow. Heavy, conditionally-needed material (the ticket template, the DTCG token machinery) lives one level deep in `references/` and is loaded on demand, so the always-resident `SKILL.md` bodies stay lean.
 
-## Install (as a Claude Code plugin)
+## Install
 
 kargha ships as a self-contained Claude Code plugin + marketplace (the `.claude-plugin/` manifests). Add the marketplace and install — from the **public GitHub** repo, which needs no auth:
 
@@ -39,85 +39,7 @@ kargha ships as a self-contained Claude Code plugin + marketplace (the `.claude-
 /plugin install kargha@kargha
 ```
 
-This registers all three skills, namespaced under the plugin: `kargha:kargha-plan`, `kargha:kargha-build`, `kargha:kargha-validate`. (Pre-1.0: the names keep the `kargha-` prefix for parity with manual install; they may shorten to `kargha:plan` / `:build` / `:validate` at a stable release.)
-
-## Install (as a Codex plugin)
-
-kargha also ships a Codex plugin manifest (`.codex-plugin/plugin.json`) and a Codex marketplace (`.agents/plugins/marketplace.json`) that reuse the same `skills/` directory.
-
-Codex installs plugins from configured marketplace snapshots. Current Codex discovery expects local marketplace entries to resolve to `./plugins/<plugin-name>` relative to the marketplace root. With kargha's plugin currently living at the repo root, adding the repo itself as a marketplace can register the marketplace but still show no plugins:
-
-```bash
-codex plugin marketplace add .
-codex plugin list --marketplace kargha-local
-# No plugins found in marketplace `kargha-local`.
-```
-
-The verified local-development install path is to expose the checkout through Codex's personal marketplace layout. From an existing local checkout:
-
-```bash
-mkdir -p ~/.agents/plugins ~/plugins
-ln -sfn "$(pwd)" ~/plugins/kargha
-```
-
-If `~/.agents/plugins/marketplace.json` does not exist yet, create it with:
-
-```bash
-cat > ~/.agents/plugins/marketplace.json <<'JSON'
-{
-  "name": "personal",
-  "interface": {
-    "displayName": "Personal"
-  },
-  "plugins": [
-    {
-      "name": "kargha",
-      "source": {
-        "source": "local",
-        "path": "./plugins/kargha"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Productivity"
-    }
-  ]
-}
-JSON
-```
-
-If the personal marketplace file already exists, add or update only the `kargha` entry above instead of replacing the whole file. Then install and verify:
-
-```bash
-codex plugin list --marketplace personal --available --json
-codex plugin add kargha@personal
-codex plugin list --marketplace personal --available --json
-```
-
-This registers the same three skills for Codex from the shared `skills/` tree: `kargha:kargha-plan`, `kargha:kargha-build`, and `kargha:kargha-validate`.
-
-After installing or reinstalling, start a new Codex thread so the newly installed plugin skills and tools are loaded. The installed cache path is `~/.codex/plugins/cache/personal/kargha/<version>`.
-
-## Install (manual)
-
-The three skills are **independent** — install all three for the full plan → build → validate loop, or just the one you need: `kargha-validate` is fully standalone, `kargha-build` works from any conforming ticket, and `kargha-plan` needs neither installed. No skill references another's files.
-
-Copy the skill directory(ies) into your skills folder:
-
-```bash
-# all three for Claude Code (personal scope)
-cp -r skills/kargha-* ~/.claude/skills/
-
-# all three for Codex (personal scope)
-cp -r skills/kargha-* ~/.agents/skills/
-
-# …or one at a time, for either host
-cp -r skills/kargha-validate ~/.claude/skills/
-cp -r skills/kargha-validate ~/.agents/skills/
-```
-
-Use `<repo>/.claude/skills/` for Claude Code project scope OR `<repo>/.agents/skills/` for Codex repo scope. The directory name is the skill name (`kargha-plan`, `kargha-build`, `kargha-validate`) under which the host triggers it — the `kargha-` prefix groups them in the skills list and acts as the namespace. (Packaged as a plugin too — see the plugin install sections above; under the plugin the skills namespace as `kargha:kargha-plan` etc.)
+This registers all three skills, namespaced under the plugin: `kargha:kargha-plan`, `kargha:kargha-build`, `kargha:kargha-validate`. (Pre-1.0: the names keep the `kargha-` prefix; they may shorten to `kargha:plan` / `:build` / `:validate` at a stable release.)
 
 ## The three skills
 
