@@ -5,7 +5,7 @@
 > **Companion:** [`kargha-fullstack-via-keel-borrowing.md`](kargha-fullstack-via-keel-borrowing.md) (the reverse direction).
 
 ## Question
-How can the **kargha** frontend skill-pipeline (plan → build → validate; a Claude Code plugin) be used effectively *inside* the **KEEL** SDLC framework (and its lean **karta** lane)?
+How can the **kargha** frontend skill-pipeline (plan → build → validate; a Claude Code OR Codex-compatible skill plugin) be used effectively *inside* the **KEEL** SDLC framework (and its lean **karta** lane)?
 
 ## The situation
 kargha and KEEL are two pipelines that overlap on frontend. The overlap is **incompatible by construction** on building/publishing but **complementary** on design-intelligence and visual evidence.

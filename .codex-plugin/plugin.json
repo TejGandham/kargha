@@ -1,0 +1,39 @@
+{
+  "name": "kargha",
+  "version": "0.1.0",
+  "description": "Stack-agnostic frontend pipeline: turn a Claude Design OR runtime-JSX design prototype into vertical-slice tickets, implemented frontend code, and visual fidelity validation.",
+  "author": {
+    "name": "Tej Gandham",
+    "email": "tej@engen.tech"
+  },
+  "homepage": "https://brahma.myth-gecko.ts.net:3000/stackhouse/kargha",
+  "repository": "https://brahma.myth-gecko.ts.net:3000/stackhouse/kargha",
+  "license": "MIT",
+  "keywords": [
+    "frontend",
+    "design",
+    "tickets",
+    "worktree",
+    "design-validation",
+    "dtcg",
+    "stack-agnostic"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "kargha",
+    "shortDescription": "Plan, build, and validate frontend slices from design prototypes.",
+    "longDescription": "kargha packages three stack-agnostic frontend skills: plan vertical-slice tickets from a Claude Design OR runtime-JSX design export, build one ticket in an isolated worktree, and validate the running view against the design prototype.",
+    "developerName": "Tej Gandham",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://brahma.myth-gecko.ts.net:3000/stackhouse/kargha",
+    "defaultPrompt": [
+      "Plan frontend tickets from this design.",
+      "Build this kargha frontend ticket.",
+      "Validate this running view against the design."
+    ]
+  }
+}

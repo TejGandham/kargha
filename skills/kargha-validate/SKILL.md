@@ -1,21 +1,21 @@
 ---
 name: kargha-validate
-description: Compare a running frontend implementation against design HTML files exported from Claude Design. Opens both the live app (at the caller-provided app URL) and the served design prototype in playwright-cli, captures screenshots and DOM snapshots, then reports structured discrepancies across layout, color, typography, spacing, component structure, and visual hierarchy. Validates one view per invocation — the calling pipeline loops for multiple views. Invoke when validating implementation fidelity — trigger phrases include "validate against the design", "compare implementation to design", "check design fidelity", "does this match the design", "visual QA against design HTML", or any request to diff what's running vs the design prototype files.
+description: Compare a running frontend implementation against design HTML files exported from Claude Design OR a runtime-JSX design source. Opens both the live app (at the caller-provided app URL) and the served design prototype in playwright-cli, captures screenshots and DOM snapshots, then reports structured discrepancies across layout, color, typography, spacing, component structure, and visual hierarchy. Validates one view per invocation — the calling pipeline loops for multiple views. Invoke when validating implementation fidelity — trigger phrases include "validate against the design", "compare implementation to design", "check design fidelity", "does this match the design", "visual QA against design HTML", or any request to diff what's running vs the design prototype files.
 ---
 
 
 
-Compare a single frontend view against its design prototype exported from Claude Design. This skill is a **validation step** in a larger pipeline — it reports discrepancies but never fixes them. The caller (or pipeline) decides what to act on.
+Compare a single frontend view against its design prototype exported from Claude Design OR a runtime-JSX design source. This skill is a **validation step** in a larger pipeline — it reports discrepancies but never fixes them. The caller (or pipeline) decides what to act on.
 
-The skill uses two subagents for fresh-context isolation:
-1. **Capture subagent** — uses playwright-cli to screenshot and snapshot both the design and the implementation
-2. **Comparison subagent** — receives only the captured data and produces a structured discrepancy report
+The skill uses two fresh-context workers when available:
+1. **Capture subagent OR host worker** — uses playwright-cli to screenshot and snapshot both the design and the implementation
+2. **Comparison subagent OR host worker** — receives only the captured data and produces a structured discrepancy report
 
 ## How this skill adapts to your project
 
-This skill is **stack-agnostic about the app under test**. It does not assume a framework, dev-server port, or font stack — those arrive as inputs from the caller (e.g. the `kargha-build` pipeline, which resolves them per project). The design side assumes a **runtime-JSX export** (a Claude Design-style HTML prototype that compiles JSX via Babel) — that is the supported design-input format, matching the planning/implementation skills.
+This skill is **stack-agnostic about the app under test**. It does not assume a framework, dev-server port, or font stack — those arrive as inputs from the caller (e.g. the `kargha-build` pipeline, which resolves them per project). The design side assumes a **Claude Design OR runtime-JSX export** (HTML prototype that compiles JSX via Babel) — that is the supported design-input format, matching the planning/implementation skills.
 
-Where this document shows a concrete value (e.g. `http://localhost:3000`, `#__next`, `pnpm nx dev frontend`, the Inter font), treat it as an **example**, not a requirement — it comes from the caller's resolved settings. The browser mechanism (`playwright-cli`) and the two-subagent capture/compare structure are this skill's own internals and stay fixed.
+Where this document shows a concrete value (e.g. `http://localhost:3000`, `#__next`, `pnpm nx dev frontend`, the Inter font), treat it as an **example**, not a requirement — it comes from the caller's resolved settings. The browser mechanism (`playwright-cli`) and the two-worker capture/compare structure (subagents OR host workers) are this skill's own internals and stay fixed.
 
 ## Inputs
 
@@ -56,7 +56,7 @@ else
 fi
 ```
 
-If no HTML file is found, bail with: "No design HTML files found at `<path>`. Provide a path to a Claude Design HTML export."
+If no HTML file is found, bail with: "No design HTML files found at `<path>`. Provide a path to a Claude Design OR runtime-JSX design HTML export."
 
 **0b. Dev server is running.** Resolve the app base URL from the caller's input (default `http://localhost:3000` if not provided), then check the app is accessible:
 
@@ -112,18 +112,18 @@ curl -s -o /dev/null -w "%{http_code}" "$DESIGN_HTML_URL"
 
 If the server fails to start or the page doesn't load, bail and kill the background process.
 
-### Phase 2 — Capture subagent
+### Phase 2 — Capture worker
 
-Spawn a **general-purpose subagent** to capture both the design prototype and the live app using playwright-cli. This subagent is purely mechanical — it navigates, waits, screenshots, and extracts data. It does NOT analyze or compare.
+Use a **general-purpose subagent** OR host worker to capture both the design prototype and the live app using playwright-cli. This capture worker is purely mechanical — it navigates, waits, screenshots, and extracts data. It does NOT analyze or compare.
 
-The subagent uses a named browser session `kargha-validate` for all commands. It interacts with the browser exclusively through `Bash` tool calls running `playwright-cli -s=kargha-validate ...` commands.
+The subagent OR host worker uses a named browser session `kargha-validate` for all commands. It interacts with the browser exclusively through Bash/shell tool calls running `playwright-cli -s=kargha-validate ...` commands.
 
-**Subagent prompt:**
+**Worker prompt:**
 
 ```
 You are a browser capture agent. Your job is to navigate to two web pages using playwright-cli, capture screenshots and DOM snapshots, and extract computed CSS values. You do NOT analyze or compare — just capture and return structured data.
 
-You interact with the browser exclusively through Bash commands using playwright-cli with session name "kargha-validate". Every browser command follows the pattern: playwright-cli -s=kargha-validate <command> [args]
+You interact with the browser exclusively through Bash/shell commands using playwright-cli with session name "kargha-validate". Every browser command follows the pattern: playwright-cli -s=kargha-validate <command> [args]
 
 ## Setup
 
@@ -157,7 +157,7 @@ Steps:
 
 5. Capture a DOM snapshot WITH bounding boxes — this is the DESIGN DOM snapshot:
    playwright-cli -s=kargha-validate snapshot --boxes --filename=design-snapshot.yaml
-   The --boxes flag adds [box=x,y,width,height] annotations to each element — the comparison subagent uses these for quantitative layout and spacing comparison. Save the full output.
+   The --boxes flag adds [box=x,y,width,height] annotations to each element — the comparison subagent OR host worker uses these for quantitative layout and spacing comparison. Save the full output.
 
 6. Check for rendering failures:
    playwright-cli -s=kargha-validate console error
@@ -236,11 +236,11 @@ Important:
 - If the session fails to open or crashes mid-capture, report the error immediately — do not retry
 ```
 
-### Phase 3 — Comparison subagent
+### Phase 3 — Comparison worker
 
-After the capture subagent returns, spawn a **separate general-purpose subagent** with ONLY the captured data. This subagent gets a fresh context — it has never seen the design files, the app code, or the pipeline state. It is purely analytical.
+After the capture subagent OR host worker returns, use a **separate general-purpose subagent** OR fresh host-worker pass with ONLY the captured data. This comparison worker gets a fresh context — it has never seen the design files, the app code, or the pipeline state. It is purely analytical.
 
-**Subagent prompt:**
+**Worker prompt:**
 
 ```
 You are a design fidelity comparison agent. You have captures from a design prototype and a live implementation of the same view. Compare them and produce a structured discrepancy report.
@@ -249,7 +249,7 @@ You must NOT suggest fixes or code changes. You are a reporter, not an implement
 
 ## Captured data
 
-${paste the full output from the capture subagent}
+${paste the full output from the capture subagent OR host worker}
 
 ## Rendering health context
 
@@ -359,14 +359,14 @@ If STATUS is "match", DISCREPANCIES can be empty. Always include TOKEN_DRIFT, MI
 
 ### Phase 4 — Report and cleanup
 
-1. **Format the report.** Take the comparison subagent's output and present it as the final validation report. Preserve the structured format exactly — downstream pipeline steps may parse it.
+1. **Format the report.** Take the comparison subagent OR host worker's output and present it as the final validation report. Preserve the structured format exactly — downstream pipeline steps may parse it.
 
 2. **Kill the design HTTP server:**
    ```bash
    kill $DESIGN_SERVER_PID 2>/dev/null || true
    ```
 
-3. **Close the browser session** (defensive — in case the capture subagent failed to close it):
+3. **Close the browser session** (defensive — in case the capture subagent OR host worker failed to close it):
    ```bash
    playwright-cli -s=kargha-validate close 2>/dev/null || true
    ```
@@ -386,16 +386,16 @@ The pipeline caller decides what to do with the discrepancy report.
 
 ## Gotchas
 
-- **React/Babel render delay.** The design HTML compiles JSX at runtime. The capture subagent MUST use `run-code` with `waitForSelector('#root > *')` before screenshotting. Without this, you get a blank page screenshot.
+- **React/Babel render delay.** The design HTML compiles JSX at runtime. The capture subagent OR host worker MUST use `run-code` with `waitForSelector('#root > *')` before screenshotting. Without this, you get a blank page screenshot.
 - **Design navigation is client-side.** The prototype uses `useState` for page switching — navigate by clicking sidebar elements, not by changing the URL. The caller must provide explicit navigation instructions.
-- **Named sessions enable isolation.** The skill uses a `kargha-validate` named session. Both captures (design + app) still happen sequentially in one subagent for simplicity, but if parallel captures are ever needed, use distinct session names (e.g., `kargha-validate-target1`, `kargha-validate-target2`).
+- **Named sessions enable isolation.** The skill uses a `kargha-validate` named session. Both captures (design + app) still happen sequentially in one subagent OR host worker for simplicity, but if parallel captures are ever needed, use distinct session names (e.g., `kargha-validate-target1`, `kargha-validate-target2`).
 - **HTTP server directory matters.** The server MUST be started from the design file's parent directory. If you serve from a parent or sibling directory, relative paths to `fonts/`, `assets/`, `uploads/` will 404.
 - **Prefer standalone HTML variants.** Files matching `*standalone*` bundle React/Babel inline and have no CDN dependency. They're larger but more reliable.
-- **The comparison subagent is read-only.** It reports findings. If it accidentally suggests fixes, strip that from the output before returning to the pipeline.
+- **The comparison subagent OR host worker is read-only.** It reports findings. If it accidentally suggests fixes, strip that from the output before returning to the pipeline.
 - **Ignore data content.** Design prototypes use hardcoded mock data. Differences in names, numbers, or dates between design and app are NOT design discrepancies.
 - **Clean `/tmp/kargha-validate/` at the start** of each run to prevent stale data from a prior invocation contaminating the current one.
-- **Session cleanup on failure.** If the capture subagent crashes or times out, the named session may be left open. Phase 4 defensively runs `playwright-cli -s=kargha-validate close` to handle this. If stale sessions accumulate, `playwright-cli list` shows all active sessions and `playwright-cli close-all` cleans them up.
+- **Session cleanup on failure.** If the capture subagent OR host worker crashes or times out, the named session may be left open. Phase 4 defensively runs `playwright-cli -s=kargha-validate close` to handle this. If stale sessions accumulate, `playwright-cli list` shows all active sessions and `playwright-cli close-all` cleans them up.
 - **eval requires JSON.stringify for complex return values.** Unlike Playwright MCP's `browser_evaluate` which auto-serialized objects, `playwright-cli eval` returns the raw expression result. Wrap complex return values in `JSON.stringify()` to ensure structured data is captured correctly.
-- **Use `--raw` when you need just the eval result.** Without `--raw`, `eval` output includes page status, generated code, and a snapshot section alongside the actual return value. The capture subagent must use `--raw` so the extracted JSON is the only output — this prevents the subagent from accidentally pasting snapshot text into the EXTRACTED_DATA fields.
-- **`--boxes` increases snapshot size.** Each element gets a `[box=x,y,width,height]` annotation, which roughly doubles the snapshot text. On very large pages, this could approach context limits for the comparison subagent. If you encounter truncation, use `snapshot --boxes --depth=5` to limit the tree depth while still getting bounding boxes for the top-level layout structure.
-- **Filter console output to errors only.** Use `playwright-cli -s=kargha-validate console error`, not bare `console`. Design prototypes routinely emit Babel deprecation warnings and React development-mode noise that would overwhelm the capture subagent's context.
+- **Use `--raw` when you need just the eval result.** Without `--raw`, `eval` output includes page status, generated code, and a snapshot section alongside the actual return value. The capture subagent OR host worker must use `--raw` so the extracted JSON is the only output — this prevents the worker from accidentally pasting snapshot text into the EXTRACTED_DATA fields.
+- **`--boxes` increases snapshot size.** Each element gets a `[box=x,y,width,height]` annotation, which roughly doubles the snapshot text. On very large pages, this could approach context limits for the comparison subagent OR host worker. If you encounter truncation, use `snapshot --boxes --depth=5` to limit the tree depth while still getting bounding boxes for the top-level layout structure.
+- **Filter console output to errors only.** Use `playwright-cli -s=kargha-validate console error`, not bare `console`. Design prototypes routinely emit Babel deprecation warnings and React development-mode noise that would overwhelm the capture subagent OR host worker's context.
