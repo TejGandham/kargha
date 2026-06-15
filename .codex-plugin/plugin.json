@@ -1,6 +1,6 @@
 {
   "name": "kargha",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Stack-agnostic frontend pipeline: turn a Claude Design OR runtime-JSX design prototype into vertical-slice tickets, implemented frontend code, and visual fidelity validation.",
   "author": {
     "name": "Tej Gandham",

@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "kargha",
   "description": "Stack-agnostic frontend pipeline: turn a design-prototype export into reviewed, merged code — plan vertical-slice tickets (kargha-plan), build one in an isolated git worktree and open a PR (kargha-build), and validate visual fidelity against the design (kargha-validate).",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "Tej Gandham",
     "email": "tej@engen.tech"
