@@ -95,7 +95,7 @@ This registers all three skills, namespaced under the plugin: `kargha:kargha-pla
 ## Requirements
 
 - **`kargha-build`** needs `git` (uses per-ticket worktrees), the project's package manager + toolchain (lint/test/build/dev), and access to the ticket source (a ticketing MCP/CLI/REST, or a ticket file).
-- **`kargha-validate`** needs [`uv`](https://docs.astral.sh/uv/), [`playwright-cli`](https://playwright.dev) (`npm install -g @playwright/cli@latest`), and a browser (Chromium). Its bundled PEP 723 scripts serve the design HTML and capture views; the running app must already be up because the caller owns the dev server's lifecycle.
+- **`kargha-validate`** needs [`uv`](https://docs.astral.sh/uv/), [`playwright-cli`](https://playwright.dev) (`npm install -g @playwright/cli@latest`, then `playwright-cli install --skills` for its companion agent skill), and a browser (Chromium). Its bundled PEP 723 scripts serve the design HTML and capture views; the running app must already be up because the caller owns the dev server's lifecycle.
 - **`kargha-plan`** needs read access to the design export and the project repo; it writes only tickets/files, never implementation code.
 
 ## Usage
