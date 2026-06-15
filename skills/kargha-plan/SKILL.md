@@ -36,6 +36,7 @@ Resolve each setting in this order: **explicit user input → detect from the re
 | **Data layer** | The API the UI reads from | Detect: a GraphQL schema file, OpenAPI/REST types, generated TS client types; may be none |
 | **Project rules** | Component / data conventions the repo documents | Detect: contributor docs, lint configs, or rules files; **verify the doc has real content before citing — a detected rules/design doc may be an unfilled template (placeholder headings, TODOs); cite only filled docs** |
 | **Toolchain commands** | lint / test / build invocations | Detect from package scripts and the repo's task runner (npm/pnpm/yarn scripts, Nx, Turborepo, Make, etc.) |
+| **Repo policy** | CI/ruleset/branch/deployment policy, only when explicitly in the frontend planning scope | Read root/area `AGENTS.md`, workflows, CI docs, current rulesets/merge settings/bypass actors when remote policy is requested; load [references/ci-policy.md](references/ci-policy.md) and [references/policy-yagni.md](references/policy-yagni.md) |
 | **Ticket destination** | Where tickets are emitted | Ask: a ticketing system (which one + how to call it) **or** plain files (output dir + `md`/`json`) — see Phase 0b |
 | **Design-validation** | Optional fidelity-check tool/skill | Use if the environment provides one (e.g., a skill that screenshots the running app and diffs it against the design); otherwise the design-validation loop becomes a manual checklist |
 
@@ -51,34 +52,17 @@ When the **Token/theme system** is a W3C DTCG design-token file (JSON leaves car
 
 Required inputs. If any is missing, ask the user once (`AskUserQuestion` OR the host's equivalent user-input prompt) to collect all missing values simultaneously (combine with any unresolved Project configuration questions).
 
-**0a. Design path.** The user must provide a path to the design HTML or its parent directory. Resolve it:
+**0a. Design path.** The user must provide a path to the design HTML or its parent directory. Resolve it with host-native filesystem APIs, not Bash/POSIX utilities:
 
-```bash
-design_path="<caller-provided-path>"
-
-if [ -d "$design_path" ]; then
-  # Prefer standalone variant (no CDN dependency); exclude print variants in BOTH
-  # branches, and sort so the pick is deterministic rather than filesystem order.
-  candidates=$(find "$design_path" -maxdepth 2 -name '*standalone*.html' ! -name '*print*' | sort)
-  if [ -z "$candidates" ]; then
-    candidates=$(find "$design_path" -maxdepth 2 -name '*.html' ! -name '*print*' | sort)
-  fi
-  design_file=$(echo "$candidates" | head -1)
-elif [ -f "$design_path" ]; then
-  design_file="$design_path"
-else
-  design_file=""   # nonexistent path — caught by the bail below
-fi
-
-# Normalize to an absolute path so downstream tickets (and the implementation
-# skill, which resolves design paths against its worktree) can always find it.
-# (POSIX-portable; `readlink -f` is GNU-only and fails on macOS/BSD.)
-[ -n "$design_file" ] && design_file="$(cd "$(dirname "$design_file")" && pwd -P)/$(basename "$design_file")"
-```
+1. If the path is a file, require an `.html` suffix and normalize it to an absolute path.
+2. If the path is a directory, list HTML files up to two levels deep, excluding print variants.
+3. Prefer filenames containing `standalone`; otherwise use the remaining HTML candidates.
+4. Sort candidates deterministically.
+5. Normalize the selected file to an absolute path so downstream tickets and the implementation skill can always find it.
 
 If no HTML found (or the supplied file path doesn't exist), bail with: "No design HTML files found at `<path>`. Provide a path to a design HTML export."
 
-**If a directory yields more than one candidate** (`echo "$candidates" | wc -l` > 1 — the normal multi-page case), do not silently pick the first: list the candidates and ask the user which export to plan from (batch this with the other Phase 0 questions). Anchoring every ticket on an arbitrary pick is worse than one question.
+**If a directory yields more than one candidate** after sorting — the normal multi-page case — do not silently pick the first: list the candidates and ask the user which export to plan from (batch this with the other Phase 0 questions). Anchoring every ticket on an arbitrary pick is worse than one question.
 
 **Format gate (the design-input contract).** After locating the HTML, confirm it is a supported Claude Design OR runtime-JSX export: verify either `.jsx` siblings exist **or** the HTML contains a `<script type="text/babel">` block — including the **external-src** form `<script type="text/babel" src="...jsx">`, which points at a sibling `.jsx` instead of holding inline JSX. If neither holds, bail with: "This HTML is not a supported Claude Design OR runtime-JSX design export (no `.jsx` sources or `text/babel` script found). Supported: Claude Design OR runtime-JSX JSX exports. Re-export in that format, or point me at the `.jsx` sources." Do not proceed to Phase 1 on an unsupported export — the analysis would silently mis-parse.
 
@@ -367,6 +351,18 @@ Also check: does the prompt mention related work already in progress? If so, not
 
 **Architectural-reversal check.** While scoping, watch for design elements that **conflict with or reverse a deliberate existing architectural decision** — a pattern the app intentionally removed or replaced (the Phase 2 codebase survey, plus any architecture/decision docs the repo exposes, are the signal). Re-adding it is not a neutral implementation detail; surface it as an **explicit scope decision** via `AskUserQuestion` OR the host user-input prompt (implement as designed / keep the current architecture and adapt the design / descope), rather than silently planning the reversal.
 
+**Policy/control work is opt-in.** This skill is primarily a frontend design-slicing planner. If the user explicitly asks this run to include CI, GitHub Actions, repository automation, branch policy, rulesets, required checks, deployment policy, generated contracts, or environment policy, load [references/ci-policy.md](references/ci-policy.md) and [references/policy-yagni.md](references/policy-yagni.md) before drafting those tickets. Do not add policy work just because it would be generally mature.
+
+For policy/control tickets:
+
+- summarize current repo policy from docs/workflows/rulesets before recommending changes
+- prefer repo-owned PEP 723 Python scripts invoked with `uv run` in uv repos
+- include a CI matrix that separates where checks run from where checks are required
+- include local doc updates when remote rulesets or branch policy change
+- simulate normal promotion, hotfix, hotfix-port, and next promotion after hotfix
+- reject settings that require forbidden back-merge
+- do not add fork hardening, merge queue, topic branch naming enforcement, CODEOWNERS expansion, strict up-to-date requirements, linear history, or fast-forward-only promotion unless repo policy or explicit user direction requires it
+
 #### 4c. Foundation ticket (conditional)
 
 Check whether the component library + theme system are integrated in the frontend app (Phase 2, Part A, item 7):
@@ -453,6 +449,13 @@ Options (as the `AskUserQuestion` OR host user-input prompt):
 - "Add more detail to a specific ticket"
 
 Do not emit until the user approves. On **Adjust scope**, collect the changes, revisit 4e (re-slice) and Phase 5 (re-draft) for the affected tickets, and re-present this approval step. On **Add more detail**, expand the named ticket and re-present. Loop until the user picks "Proceed as planned".
+
+If this run replaces an already emitted/published ticket plan, mark the prior plan as superseded before emitting replacements:
+
+- **Ticketing system:** add a comment or status/label marking the old tickets superseded, link the replacement tickets, and do not leave outdated guidance as active.
+- **Plain files:** update the old ticket files and manifest/index with `superseded_by`, or move them to a clearly superseded section while preserving history.
+
+Do not silently leave two conflicting active plans.
 
 ---
 

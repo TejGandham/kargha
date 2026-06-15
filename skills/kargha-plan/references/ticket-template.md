@@ -201,6 +201,21 @@ Never propose touching documented transitional-debt blocks — flag those to the
 <build command>
 ```
 
+## CI / Policy Matrix (CI, GitHub Actions, repository automation, branch policy, rulesets, required checks, deployment policy, generated contracts, or environment policy tickets only)
+
+Omit this section for ordinary frontend component/view tickets. Include it whenever the ticket changes CI or repository policy.
+
+| Check | Runs where | Required where | Failure behavior |
+| --- | --- | --- | --- |
+| `<check/context name>` | `<branches/events>` | `<rulesets/branches or informational>` | `<blocks merge / reports only / opens follow-up>` |
+
+Notes:
+
+- State exact emitted check context names when known.
+- If a required check is new, first add and merge the workflow/script, then confirm the exact context before requiring it in a ruleset.
+- In uv repos, non-trivial automation should live in a repo-owned PEP 723 script and run locally and in CI with `uv run`.
+- State any branch-flow assumptions, including whether forks are accepted and whether back-merge is forbidden.
+
 ### Design Validation Loop (if available)
 
 **Foundation/setup tickets (`View: none`): this whole loop is N/A — omit it.** There is no view to validate; the ticket's done-definition is lint/test + token-conformance + PR. For all other tickets:

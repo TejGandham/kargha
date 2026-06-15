@@ -1,6 +1,6 @@
 ---
 name: kargha-build
-description: Implement a frontend ticket (planned by kargha-plan) end-to-end in an isolated git worktree with design-aware and optional data-layer-aware validation. Resolves the project's stack, ticketing system, and toolchain up front. Gates on ticket status/assignee, reads the plan's Design Reference and Component-to-Library Map, picks up the ticket, spins up a worktree, implements the components, runs lint/test, runs optional data-layer and visual-fidelity validation loops (each up to 3 rounds), then opens a PR via the project's mechanism. Invoke when the user points at a frontend implementation ticket from kargha-plan — trigger phrases include "build this frontend ticket", "implement the frontend ticket", "pick up the frontend work", or any request to implement a ticket that has a Design Reference section. This skill should NOT trigger for non-frontend tickets (those go to a non-frontend implementation skill/agent).
+description: Use when implementing a kargha-plan frontend ticket with a Design Reference section, picking up frontend work into an isolated git worktree, running lint/test plus optional data-layer and visual-fidelity validation, and opening a PR. Also use for narrow frontend inspection aids that touch auth, routing, or security UX, such as holding a login screen for manual inspection. Do not use for non-frontend tickets.
 ---
 
 
@@ -44,6 +44,7 @@ Resolve each setting in this order: **explicit user input → detect from the re
 | **Branch convention** | Branch-name template — must embed the ticket id | Ask/detect; default `<prefix>_<ticket-id>_<slug>`; the embedded ticket id lets the PR step recover it |
 | **PR conventions** | Target repo, reviewers, labels, title prefix | Detect repo from the git remote; ask/detect reviewer-selection rule, label set, and ticket-id title prefix (any may be none). The reviewer-selection rule must exclude the PR owner from reviewing their own PR (e.g. pick the other member of a fixed reviewer set) |
 | **Project rules** | Component-structure and data-layer convention docs | Detect: contributor docs, lint configs, or rules files; cite them during implementation/fixes if present, else fall back to inline generic conventions |
+| **Repo policy** | Branch/CI/ruleset/deployment policy, only when the ticket touches those areas | Read root/area `AGENTS.md`, existing workflows, CI docs, current rulesets/merge settings/bypass actors when remote policy is in scope. For details load [references/ci-policy.md](references/ci-policy.md) and [references/policy-yagni.md](references/policy-yagni.md) |
 | **Design-validation** | Optional fidelity-check tool/skill | Use if the environment provides one (a skill that screenshots the running app and diffs it against the design); otherwise Phase 7 becomes a manual checklist |
 
 Record the resolved values — every later phase references them. In this document, placeholders like `<frontend-app>`, `<component-lib>`, `<lint command>`, `<dev command>`, `<dev-server-url>`, `<dev-server-port>`, `<backend-port>`, `<data-layer-detector>`, `<generated-code-dir>`, `<default-branch>`, `<ticket-id>`, `<pickup-statuses>`, `<in-progress-status>`, `<review-status>` refer to these resolved settings.
@@ -60,6 +61,10 @@ This machinery keys off the **project's** token system, not the design's. A DTCG
 
 ## Workflow
 
+### Always-on mutation guard
+
+Before any file mutation, apply [references/worktree-safety.md](references/worktree-safety.md): assert the intended root with `git rev-parse --show-toplevel`, check the current branch with `git branch --show-current`, and refuse implementation edits when the root or branch is wrong. Repeat this after creating a worktree, changing directories, resuming after context compaction, or any failed patch. After Phase 4b, the intended root is the implementation worktree, not the original checkout.
+
 ### Phase 0a — Resolve the ticket source mode
 
 Before resolving identity or fetching anything, determine which **ticket mode** is active — every later phase (0, 1, 2a, 3a, 3b, 9) branches on it.
@@ -70,6 +75,30 @@ Before resolving identity or fetching anything, determine which **ticket mode** 
 Resolve the mode in this order: explicit user input → detect from the reference shape (a filesystem path that exists ⇒ file-ticket; an id/key/URL ⇒ ticketing-system) → ask the user. Record `TICKET_MODE` (`ticketing-system` | `file-ticket`) for the rest of the run.
 
 **File-ticket lifecycle-field contract.** `kargha-plan` file tickets carry front-matter `{id, title, type, parent, depends_on, estimate}` — there is **no** `status` and **no** `assignee` field by default. So in file-ticket mode the status and assignee gates (Phase 1) are informational-only and pass when the field is absent, the pickup assign/transition steps (Phase 3) are additive writes (they create the field if missing) or no-ops, and the review-status write (Phase 9) is additive. This is expected, not an edge case. If a file ticket *does* carry `status`/`assignee` fields (a custom producer), honor them as real gates.
+
+### Phase 0b — Classify intent before choosing a workflow
+
+Classify the user's request before framing the work:
+
+- **implementation of an approved plan** — normal `kargha-build` ticket execution
+- **inspection aid** — behavior works, but the user needs to see or hold a state such as a login screen
+- **bug fix** — behavior is broken or regressed
+- **product feature** — new user-facing behavior not already approved in the ticket
+- **CI/policy change** — workflow, ruleset, branch, deployment, generated-contract, or environment behavior
+
+If the user corrects the category, drop the old framing immediately. Do not describe an inspection aid as a bug. For inspection aids and CI/policy changes, keep scope explicit and temporary/contained unless the user asks for a permanent product change.
+
+**Ticketless inspection-aid mode.** If the request is a narrow frontend inspection aid and no `kargha-plan` ticket exists, do not force the ticket gates. Use this limited flow:
+
+1. Resolve the frontend app, toolchain, default branch, worktree root, and relevant project rules from Project configuration.
+2. State the high-impact mutation preview from Phase 4d and wait for confirmation before editing.
+3. Create an isolated worktree from the default branch with a branch like `inspect_<short-slug>` or the project's equivalent.
+4. Run the mutation guard before every edit.
+5. Implement only the confirmed inspection aid.
+6. Run the relevant lint/test/build checks.
+7. Report the worktree path and changed files. Do not move tickets or open a PR unless the user explicitly asks.
+
+This mode is for observability/inspection only. If the change becomes product behavior, convert it to a normal ticket or explicit product-feature request.
 
 ### Phase 0 — Resolve the current user
 
@@ -159,7 +188,7 @@ In file-ticket mode there are no remote comments; treat any inline "Notes"/"Upda
 
 - **Do the referenced/reused files still exist?** Glob/Read the paths the ticket cites as existing — reuse targets, critical-files, and any "depends on" file paths. (Do **not** existence-check the "Files to Create" section — those are new files that by definition don't exist yet; see the conflict check below.)
 - **Do "Files to Create" conflict with existing files?** For each path in the ticket's "Files to Create" section (which `kargha-plan` emits), flag any that already exist with different content — a conflict to resolve, not the expected greenfield case.
-- **Do citations still resolve?** If the plan says "reuse `<some/shared/path>`", grep for it.
+- **Do citations still resolve?** If the plan says "reuse `<some/shared/path>`", search for it with the host's fastest available code-search tool.
 - **Has the surrounding code drifted?** Confirm function signatures and data shapes match.
 
 **2c. Frontend-specific checks:**
@@ -200,21 +229,33 @@ Example: `<prefix>_{{EXAMPLE_TICKET}}_signal-feed-page`. Keep the slug short (~3
 
 **4b. Create the worktree** from the default branch, into the configured worktree root:
 
-```bash
+```
 branch="<prefix>_<ticket-id>_<slug>"
 worktree="<worktree-root>/${branch}"
-mkdir -p "<worktree-root>"
 git worktree add "$worktree" -b "$branch" "<default-branch>"
 cd "$worktree"
 ```
 
-If `git worktree add` fails because the branch or path already exists, don't clobber it — stop and ask the user. An existing worktree usually means a prior run they may want to resume.
+Create `<worktree-root>` with the host's native filesystem operation if it does not exist; do not assume Bash/WSL/POSIX syntax. If `git worktree add` fails because the branch or path already exists, don't clobber it — stop and ask the user. An existing worktree usually means a prior run they may want to resume.
+
+Immediately after `cd "$worktree"`, run the mutation guard from [references/worktree-safety.md](references/worktree-safety.md). The actual root must equal `<worktree-root>/<branch>`, and the current branch must be the new ticket branch before any implementation edit.
 
 **4c. Install dependencies.** Run `<install command>` in the worktree before any build/lint/test/dev commands — worktrees need their own dependency links.
 
 **4c-bis. Build the token manifest (DTCG token systems only).** When the project has a DTCG/tiered token system, build the token manifest before any implementation lookup — see **[references/dtcg-tokens.md](references/dtcg-tokens.md)** ("Phase 4c-bis — Build the token manifest"). Phase 4d, Phase 5's conformance check, and Phase 7's `TOKEN_DRIFT` reverse-map all read it. Skip this step entirely when the project has no DTCG/tiered token system.
 
 **4d. Implement the plan's steps** in the worktree. Follow the ticket's "Component Plan" and "Files to Create" sections. Key rules:
+
+**High-impact mutation preview.** Before editing auth, routing, guards, security, CI/CD, GitHub rulesets, branch policy, deployment, generated contracts, or environment files, state:
+
+- the exact behavior change
+- likely files/classes/workflows touched
+- what remains unchanged
+- rollback or containment notes, when relevant
+
+Wait for confirmation when the user asked to inspect/approve first, or when the change introduces new route/security/policy behavior not already approved in the ticket. Example: "I propose adding `/auth?preview=login` as a local-only inspection mode that suppresses redirect handling only for that page load. Normal `/auth`, guard behavior, and deep-link restoration stay unchanged."
+
+**CI/policy tickets.** If the ticket touches CI, GitHub Actions, repository automation, branch policy, rulesets, required checks, deployment policy, generated contracts, or environment policy, load [references/ci-policy.md](references/ci-policy.md) and [references/policy-yagni.md](references/policy-yagni.md) before editing. Summarize the current repo policy first. Prefer repo-owned PEP 723 Python scripts invoked with `uv run` in uv repos, keep workflows thin, distinguish "runs" from "required", and do not add fork hardening, merge queue, branch-up-to-date requirements, topic branch naming, CODEOWNERS, or similar controls unless repo policy or explicit user direction requires them.
 
 - Follow the project's component-structure conventions — cite the project's component-rules doc if one was resolved in Project configuration (e.g. PascalCase files, named exports, the project's styling approach, co-located test files); otherwise apply sensible inline conventions.
 - Follow the project's data-layer conventions — cite the project's data-layer-rules doc if one exists (e.g. fragment colocation, the project's preferred query hook, network-mocking for tests).
@@ -250,21 +291,16 @@ Validate that created or modified components follow the project's data-layer con
 
 #### 5b-1. Identify target files
 
-Only validate files that were created or modified in this ticket **and** contain data-layer operations. Skip this phase entirely if no files qualify. Use the resolved `<data-layer-detector>` from Project configuration — the literal `graphql(` below is just the GraphQL example; for REST/tRPC the detector is "files importing the client or calling the typed endpoints," etc. Anchor on the resolved detector, not the example token. Exclude generated code (the `<generated-code-dir>` resolved in Project configuration; drop that `grep -v` if the project has no generated-code directory) and test files.
+Only validate files that were created or modified in this ticket **and** contain data-layer operations. Skip this phase entirely if no files qualify. Use the resolved `<data-layer-detector>` from Project configuration — the literal `graphql(` is just the GraphQL example; for REST/tRPC the detector is "files importing the client or calling the typed endpoints," etc. Anchor on the resolved detector, not the example token. Exclude generated code (the `<generated-code-dir>` resolved in Project configuration, if any) and test files.
 
-```bash
-# Stage new files first so untracked, just-created files are included in the diff.
-git add -A
-# From the worktree, find changed source files relative to the default branch,
-# excluding generated code and tests, that contain data-layer operations.
-# The extension set should match the resolved framework's source files, not just React's.
-git diff --name-only "<default-branch>" -- '<frontend-app>/**' \
-  | grep -E '\.(tsx?|jsx?|vue|svelte)$' \
-  | grep -v '<generated-code-dir>' \
-  | grep -v '\.test\.\|\.spec\.' \
-  | while read f; do grep -l '<data-layer-detector>' "$f" 2>/dev/null; done \
-  | sort -u
-```
+Stage new files first (`git add -A`) so untracked, just-created files are included in the diff. Then enumerate changed files relative to `<default-branch>` with `git diff --name-only --diff-filter=ACMR <default-branch>...HEAD -- <frontend-app>`, filter in memory or with the host's native tools, and keep only files that:
+
+- match the resolved framework's source extensions
+- are not under `<generated-code-dir>` when one exists
+- are not test/spec files
+- contain the resolved `<data-layer-detector>` pattern or import
+
+Use a repo-owned helper script when this logic becomes non-trivial; do not assume Bash pipelines, `grep`, `find`, or WSL are available locally.
 
 This produces a list of modified frontend source files (excluding generated code and tests) that contain data-layer operations. If the list is empty, log "No data-layer files modified — skipping data-layer validation" and jump to Phase 6.
 
@@ -330,37 +366,19 @@ When fixing issues between rounds:
 
 The design-validation step requires the frontend app running at the configured dev-server URL `<dev-server-url>`.
 
-**6a. Check port availability** (`lsof` is the example mechanism; where it's unavailable — minimal CI containers, non-Unix dev envs — use an equivalent like `ss -ltnp`, `fuser`, `netstat`, or a `curl`-based liveness check):
+Do not assume Bash, WSL, POSIX background syntax, `/tmp`, `curl`, `grep`, `lsof`, or `kill` exist on the developer machine. Use the host's native process and HTTP facilities, or a repo-owned helper script, and record the exact command/handle you used.
 
-```bash
-lsof -i :<dev-server-port> -t 2>/dev/null
-```
+**6a. Check port availability** with a host-native mechanism (for example a Python socket probe, PowerShell TCP connection lookup, the project's dev-server status command, or the platform's equivalent). Check both the frontend port and the backend port when the dev target starts a backend.
 
-If something is already on the dev-server port (or the backend port, when the dev target starts one), bail with a message asking the user to stop it first. Do NOT kill another process's dev server. (This guards against *other* processes — when an instruction elsewhere says to **restart** your own dev server, e.g. after a token rebuild or a degraded server in Phase 7e, first `kill $DEV_SERVER_PID` to free the port, then repeat these Phase 6 steps; otherwise this check sees your own still-running server and bails.)
+If something is already on the dev-server port (or the backend port, when the dev target starts one), bail with a message asking the user to stop it first. Do NOT stop another process's dev server. (This guards against *other* processes — when an instruction elsewhere says to **restart** your own dev server, e.g. after a token rebuild or a degraded server in Phase 7e, first stop the recorded `DEV_SERVER_PID` process/handle to free the port, then repeat these Phase 6 steps; otherwise this check sees your own still-running server and bails.)
 
-**6b. Start the dev server in the background:**
-
-```bash
-<dev command> &
-DEV_SERVER_PID=$!
-```
+**6b. Start the dev server as a managed background process/session.** Record its process id or host process handle as `DEV_SERVER_PID` (or the host equivalent), plus its log location. Do not use POSIX `&` syntax unless the host shell is known to support it.
 
 If the dev target transitively starts a backend/API service (resolved in Project configuration), that service also comes up on its port — both are needed when the frontend depends on the backend for data. Note its port for cleanup in Phase 8. (If the project has no local backend dependency, there is just the one dev server.)
 
-**6c. Wait for the server to be ready.** Poll until the **specific app route** responds (not just `/` — many dev servers compile/warm pages on demand):
+**6c. Wait for the server to be ready.** Poll the **specific app route** with a host-native HTTP client until it responds with an expected status such as `200`, `307`, or `308` (not just `/` — many dev servers compile/warm pages on demand). Use an explicit retry limit around 60 seconds and capture failure output.
 
-```bash
-for i in $(seq 1 30); do
-  http_code=$(curl -s -o /dev/null -w "%{http_code}" "<dev-server-url>${APP_ROUTE}" 2>/dev/null)
-  if echo "$http_code" | grep -qE "^(200|307|308)$"; then
-    echo "Dev server ready"
-    break
-  fi
-  sleep 2
-done
-```
-
-If the server is not responding after ~60 seconds (30 retries), kill the process and bail with the error. Common causes: port conflict, build error that lint/test didn't catch, or missing environment variables.
+If the server is not responding after ~60 seconds (30 retries), stop the recorded process/handle and bail with the error. Common causes: port conflict, build error that lint/test didn't catch, or missing environment variables.
 
 **A bare 2xx/3xx is not proof the view rendered when it's behind auth.** An unauthenticated request to a protected route can return `200` on a login page or `3xx` to `/login` — passing this poll while the target view is still unreachable. If the route requires authentication, detect the auth redirect/login-page response here, and treat establishing a logged-in session (and ensuring any backend service the view needs is up) as a Phase 7a prerequisite, not satisfied by this poll. See references/design-validation-loop.md (7a).
 
@@ -374,24 +392,11 @@ This is the core frontend differentiator — visual fidelity against the design.
 
 The full per-round procedure is in **[references/design-validation-loop.md](references/design-validation-loop.md)** — the tool-invocation contract (7a), the report format + decision table (7b), fix guidance including `TOKEN_DRIFT` reverse-mapping (7c), the loop-control pseudocode (7d), the theme-context smoke/full handling, and the edge cases (7e).
 
-### Phase 8 — Kill the dev server
+### Phase 8 — Stop the dev server
 
 **Always runs, regardless of outcome.** Whether the skill succeeds, fails at a gate, or hits an error after starting the dev server, this cleanup must happen.
 
-```bash
-kill $DEV_SERVER_PID 2>/dev/null || true
-# Only if the port is STILL held after killing our own PID, clean up an orphan we spawned.
-# Guard the port-kill so it can't take out an unrelated process that happens to bind the port
-# (matches our dev command; lsof is the example mechanism — substitute ss/fuser/netstat).
-for pid in $(lsof -i :<dev-server-port> -t 2>/dev/null); do
-  ps -o command= -p "$pid" | grep -q "<dev command>" && kill "$pid" 2>/dev/null || true
-done
-# Same guard for the backend port — only kill a process the dev command spawned, never a
-# pre-existing shared backend/DB the user was already running on that port.
-for pid in $(lsof -i :<backend-port> -t 2>/dev/null); do
-  ps -o command= -p "$pid" | grep -q "<backend service command>" && kill "$pid" 2>/dev/null || true
-done
-```
+Stop only the process or process tree this run started, using the host's native process handle. If the port is still held afterward, clean up an orphan only when you can prove it was spawned by this run's recorded dev command; never stop an unrelated process that happens to bind the same port. Apply the same guard to the backend port when the dev target started a backend/API service.
 
 This frees only the server *this run* started — consistent with Phase 6a's "do not kill another process's dev server." If the skill exits before Phase 6 (e.g. at a gate in Phase 1), this phase is a no-op. If the project has no backend service, only the dev-server port needs freeing.
 
@@ -417,6 +422,8 @@ Include this additional context in the PR body:
 
 Because the branch was pre-created with the ticket id, the PR step does the full create flow (new feature branch, no open PR yet).
 
+**Bypass is not normal flow.** Do not use admin/ruleset bypass as a routine merge path. If the user explicitly authorizes break-glass, follow [references/ci-policy.md](references/ci-policy.md): report why normal merge was blocked, who performed the bypass, explicit authorization, merge commit, and timestamp. If bypass actors exist in rulesets, describe the policy as blocked for normal users with documented break-glass bypass rather than absolute.
+
 ### Phase 10 — Report back
 
 Brief summary to the user (~8 lines):
@@ -438,20 +445,21 @@ Leave the worktree in place — PR review rounds frequently need it back.
 - **All three Phase 1 gates are hard stops.** Status, assignee, and Design Reference presence. Don't prompt for confirmation — bail immediately on failure.
 - **Don't hardcode the user.** Resolve identity dynamically in Phase 0 from the configured source. In ticketing-system mode, don't fall back to `$USER`, git config, or the harness email — those are the OS/VCS identity. Only file-ticket mode uses the git/config identity.
 - **Ticketing is pluggable.** Map every ticketing concept to both modes: gating reads a status/assignee field (or front-matter `status` / no-op for files), pick-up assigns + transitions (or updates front-matter / no-op), and completion transitions to the review status (or updates front-matter + reports).
-- **Always work in the worktree.** After Phase 4b, every file path must resolve under `<worktree-root>/<branch>/`. Double-check with `pwd` or `git rev-parse --show-toplevel`.
+- **Always work in the worktree.** After Phase 4b, every implementation file path must resolve under `<worktree-root>/<branch>/`. The mutation guard in [references/worktree-safety.md](references/worktree-safety.md) is mandatory before every file edit.
 - **Don't clobber an existing worktree.** If `git worktree add` fails, stop and ask.
 - **The branch name must embed the ticket id.** The PR step recovers the id from the branch name — never strip it.
 - **Transitions are looked up dynamically.** Don't hard-code transition/state ids; query the system for them.
 - **Parse the ticket payload per the configured provider.** Field locations and casing differ across JIRA / Linear / GitHub Issues / file front-matter — normalize before comparing.
 - **Always read ticket comments, not just the description.** Comments contain plan-review feedback and corrections. When a comment contradicts the plan, the comment wins. (File tickets: treat inline notes the same way.)
-- **Port conflicts are the #1 failure mode.** Another dev server (or backend) on the configured port will silently cause failures. Always check before starting; never kill another process's server.
-- **The dev target may start a backend too.** If the project's dev command transitively starts a backend/API service, Phase 8 must kill both ports.
+- **Port conflicts are the #1 failure mode.** Another dev server (or backend) on the configured port will silently cause failures. Always check before starting; never stop another process's server.
+- **Do not assume POSIX tooling.** Local validation may run on Windows without WSL. Prefer host-native commands or repo-owned Python helpers over Bash snippets.
+- **The dev target may start a backend too.** If the project's dev command transitively starts a backend/API service, Phase 8 must stop only the processes this run started.
 - **Resolve the design file path against the worktree root**, not the main checkout. Design files typically live in the repo alongside the app code.
 - **Design validation is expensive.** Each round can spawn capture + comparison subagents OR host workers plus a browser session. The 3-round cap is a mandatory cost control — don't exceed it.
 - **Always run lint/test before design validation.** If the code doesn't compile, the dev server serves a broken page and a whole validation round is wasted on a build error.
 - **Hit the actual app route in the health check, not just `/`.** Dev servers often compile/warm pages on demand; the root might respond while the specific route is still compiling.
 - **The Component-to-Library Map is the contract.** If design validation reports a component fidelity issue, check the map first — the implementation should use exactly the library components specified.
-- **Kill the dev server on every exit path.** Whether the skill succeeds, fails at a gate, or errors after Phase 6, the dev-server port (and backend port, if any) must be freed. Structure cleanup to run on every exit path.
+- **Stop the dev server on every exit path.** Whether the skill succeeds, fails at a gate, or errors after Phase 6, the dev-server port (and backend port, if any) must be freed. Structure cleanup to run on every exit path.
 - **Data-layer validation is conditional and scoped.** Run it only when the project has a data layer with conventions, and only against modified files containing data operations — never the whole source tree, and never generated code. Both the data-layer loop and the design loop are capped at 3 rounds.
 - **Warnings don't block.** Only Issues (clear rule violations) trigger fix-and-retry rounds. Warnings are informational.
 - **Generated token artifacts are read-only ground truth.** In a DTCG setup the generated CSS is what the manifest and conformance checks read — and the one thing never edited. The editable surface is the DTCG JSON; the bridge is `<token-build-command>`.
