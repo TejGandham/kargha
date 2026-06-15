@@ -109,7 +109,7 @@ def self_test() -> None:
         html = root / "demo.standalone.html"
         html.write_text("<!doctype html><title>kargha</title><div id='root'>ok</div>", encoding="utf-8")
         design_file = resolve_design_file(root)
-        assert design_file == html
+        assert design_file == html.resolve()
 
         handler = functools.partial(QuietHandler, directory=str(root))
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)

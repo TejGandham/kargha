@@ -12,7 +12,7 @@ The skill uses bundled PEP 723 Python scripts to avoid Bash/WSL/POSIX assumption
 
 Run both through `uv run`. Resolve the script paths relative to this `SKILL.md` directory. Do not invoke Python automation as `python script.py` in a uv-managed environment.
 
-`playwright-cli` is an external dependency. This skill uses the installed `playwright-cli` command; it does not patch, wrap, bypass, or maintain Playwright CLI behavior. If a Playwright action cannot be performed, fail with the command, exit code, stdout, and stderr.
+`playwright-cli` is an external dependency. This skill uses the installed `playwright-cli` command; it does not patch, wrap, bypass, or maintain Playwright CLI behavior. If a Playwright action cannot be performed, fail with the command, exit code, stdout, and stderr. When `playwright-cli` is not installed at all, `capture_view.py` fails with a one-time install CTA (`npm install -g @playwright/cli@latest`, then `playwright-cli install --skills` for its companion agent skill); relay that message to the user and stop — do not auto-install or hand-drive Playwright.
 
 ## Inputs
 
@@ -45,7 +45,7 @@ All checks are hard gates. Fail with a clear report rather than prompting.
    Then use the same script in Phase 1 with the caller's design path. If it cannot resolve an HTML file, stop with: "No design HTML files found at `<path>`. Provide a Claude Design OR runtime-JSX design HTML export."
 
 3. **App dev server is already running.** The caller owns the app server lifecycle. Use a host-native HTTP check or let `capture_view.py` fail on navigation. Do not start the app server here.
-4. **`playwright-cli` is available.** `capture_view.py` checks this before capture.
+4. **`playwright-cli` is available.** `capture_view.py` checks this before capture. If it is missing, the script exits non-zero with an actionable install CTA — the two-step `npm install -g @playwright/cli@latest` then `playwright-cli install --skills`, plus the docs link. Surface that message and stop; this stays a hard gate (no prompting, no auto-install, no degraded capture).
 
 Do not assume Bash, WSL, `/tmp`, `curl`, `grep`, `find`, `lsof`, `kill`, or POSIX background syntax.
 

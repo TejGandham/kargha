@@ -61,10 +61,23 @@ AUTH_JS = r"""(() => {
 })()"""
 
 
+PLAYWRIGHT_CLI_MISSING_HELP = (
+    "playwright-cli is not available on PATH, so I can't capture the app/design "
+    "for visual validation.\n"
+    "\n"
+    "To enable it (one-time):\n"
+    "  1. npm install -g @playwright/cli@latest\n"
+    "  2. playwright-cli install --skills   # adds its agent skill\n"
+    "\n"
+    "Docs: https://github.com/microsoft/playwright-cli\n"
+    "Then re-run the validation and I'll pick up from here."
+)
+
+
 def resolve_playwright_command() -> list[str]:
     resolved = shutil.which("playwright-cli")
     if not resolved:
-        raise SystemExit("playwright-cli is not available on PATH")
+        raise SystemExit(PLAYWRIGHT_CLI_MISSING_HELP)
     return [resolved]
 
 
@@ -192,6 +205,23 @@ def self_test() -> None:
     assert (width, height) == (1440, 900)
     sample = {"compare_ready": False, "app": {"health": "DEGRADED_AUTH"}}
     assert sample["app"]["health"] == "DEGRADED_AUTH"
+    # CTA message content
+    assert PLAYWRIGHT_CLI_MISSING_HELP.startswith("playwright-cli is not available on PATH")
+    assert "npm install -g @playwright/cli@latest" in PLAYWRIGHT_CLI_MISSING_HELP
+    assert "playwright-cli install --skills" in PLAYWRIGHT_CLI_MISSING_HELP
+    assert "https://github.com/microsoft/playwright-cli" in PLAYWRIGHT_CLI_MISSING_HELP
+    # resolve_playwright_command raises the CTA when the binary is absent
+    original_which = shutil.which
+    shutil.which = lambda _cmd: None
+    try:
+        raised = None
+        try:
+            resolve_playwright_command()
+        except SystemExit as exc:
+            raised = str(exc)
+        assert raised == PLAYWRIGHT_CLI_MISSING_HELP
+    finally:
+        shutil.which = original_which
     print("capture_view self-test passed")
 
 
