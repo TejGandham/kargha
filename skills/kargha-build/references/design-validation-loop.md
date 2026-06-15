@@ -34,6 +34,8 @@ Prefer the pre-authored `DESIGN_VALIDATION_PARAMS` values (focus areas, app navi
 
 **Authenticated views — establish the session first.** When the target view is behind authentication, the Phase 6c poll only proves the dev server is up (a `200` can be a login page, a `3xx` a redirect to `/login`) — the validator would otherwise capture the login screen and report it as a total mismatch. Before invoking, ensure (a) any backend/auth service the view depends on is up (not just the frontend dev server), and (b) a logged-in session exists for the capture: drive the login flow in the same browser session the tool uses (the `App navigation` steps may include it), inject a session cookie/token, or use the project's documented test-login mechanism. Confirm the captured page is the actual view, not the login page, before trusting the report.
 
+If the validator returns `APP_HEALTH: DEGRADED_AUTH` or `STATUS: blocked_auth`, do not treat the login page as a visual mismatch and do not burn a design-fix round. Stop the loop and ask for authenticated session setup (or implement the already-approved local inspection/auth setup if the ticket explicitly covers it).
+
 **Theme contexts (when the resolved theme/token system declares them).** Run the validation loop against the base context the ticket specifies (default: base/light). For an alternate context the ticket lists, the default is a cheap **smoke check** after the loop passes — this needs nothing from the design prototype. Concretely, activate the context the way the **resolved theme-context selector** demands — an attribute selector (`[data-theme="dark"]`) → `document.documentElement.setAttribute(...)`; a class (`.dark`) → toggle that class on the scope element; `prefers-color-scheme` → emulate the media (e.g. Chrome DevTools `Emulation.setEmulatedMedia`), since attribute/class mutation won't trigger it; or use the app's own toggle if it has one. Then confirm (a) the route still renders without console errors and (b) a few key theme variables resolve non-empty (read them on the element the selector scopes to, not always `documentElement`) — read them with `getComputedStyle(document.documentElement).getPropertyValue('--<var>')` for representative variables (surface, text, accent) and check none come back empty. An empty value means an alternate-context override is missing. Run a **full second validation loop** only when `DESIGN_VALIDATION_PARAMS` marks the context `full` **and** supplies design + app navigation that switches both into it: the design-validation tool compares against the design *as navigated* and has no theme input of its own, so without a switchable design prototype a "full" dark loop would compare a dark app against a light design and burn all three rounds. Absent the `full` marker and switch navigation, do the smoke check only.
 
 #### 7b. Parse the report and decide
@@ -41,8 +43,9 @@ Prefer the pre-authored `DESIGN_VALIDATION_PARAMS` values (focus areas, app navi
 Expected report structure:
 
 ```
-STATUS: <match | partial | mismatch>
+STATUS: <match | partial | mismatch | blocked_auth>
 SUMMARY: <assessment>
+APP_HEALTH: <OK | DEGRADED | DEGRADED_AUTH>
 DISCREPANCIES:
   - DIMENSION: <layout|colors|typography|spacing|components|hierarchy|interactive|content>
   - SEVERITY: <critical|major|minor|cosmetic>
@@ -61,6 +64,7 @@ Decision logic:
 | ------------------------------------------------------------------------ | -------------------------------------------- |
 | `STATUS: match`                                                          | Exit loop — validation passed                |
 | `STATUS: partial` with zero `critical` and zero `major` discrepancies    | Exit loop — good enough                      |
+| `STATUS: blocked_auth` or `APP_HEALTH: DEGRADED_AUTH`                    | Stop — request authenticated session setup; do not compare login to design |
 | `STATUS: partial` or `mismatch` with `critical` or `major` discrepancies | Fix and re-run                               |
 | Round 3 reached with residual issues                                     | Stop — surface to user via `AskUserQuestion` OR host user-input prompt |
 

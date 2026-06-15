@@ -25,7 +25,7 @@ kargha/
   skills/
     kargha-plan/      SKILL.md  +  references/{ticket-template.md, dtcg-tokens.md}
     kargha-build/     SKILL.md  +  references/{dtcg-tokens.md, design-validation-loop.md}
-    kargha-validate/  SKILL.md
+    kargha-validate/  SKILL.md  +  scripts/{serve_design.py, capture_view.py}
 ```
 
 Each skill is a self-contained canonical Agent Skill — a directory whose `SKILL.md` carries the frontmatter (`name` + `description`) and the workflow. Heavy, conditionally-needed material (the ticket template, the DTCG token machinery) lives one level deep in `references/` and is loaded on demand, so the always-resident `SKILL.md` bodies stay lean.
@@ -95,7 +95,7 @@ This registers all three skills, namespaced under the plugin: `kargha:kargha-pla
 ## Requirements
 
 - **`kargha-build`** needs `git` (uses per-ticket worktrees), the project's package manager + toolchain (lint/test/build/dev), and access to the ticket source (a ticketing MCP/CLI/REST, or a ticket file).
-- **`kargha-validate`** needs [`playwright-cli`](https://playwright.dev) (`npm install -g @playwright/cli@latest`), a browser (Chromium), and `python3` (serves the design HTML over HTTP). The running app must already be up — the caller owns the dev server's lifecycle.
+- **`kargha-validate`** needs [`uv`](https://docs.astral.sh/uv/), [`playwright-cli`](https://playwright.dev) (`npm install -g @playwright/cli@latest`), and a browser (Chromium). Its bundled PEP 723 scripts serve the design HTML and capture views; the running app must already be up because the caller owns the dev server's lifecycle.
 - **`kargha-plan`** needs read access to the design export and the project repo; it writes only tickets/files, never implementation code.
 
 ## Usage
