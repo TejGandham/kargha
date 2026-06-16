@@ -11,7 +11,7 @@ The binder (`.kargha/binders/<slug>.json`) is the cross-skill contract and is **
 
 ---
 
-## Phase 0 — Preflight
+## Phase 0 — Preflight  `deliver:preflight`
 
 **Validate the binder.** Run:
 
@@ -32,7 +32,7 @@ Never silently resume or silently clear — the user chooses.
 
 ---
 
-## Phase 1 — Integration branch
+## Phase 1 — Integration branch  `deliver:integration`
 
 Create or locate `kargha/<slug>/integration` in its own worktree per [references/integration-branch.md](references/integration-branch.md).
 
@@ -43,7 +43,7 @@ The integration worktree is separate from per-item worktrees. Keep it alive for 
 
 ---
 
-## Phase 2 — Wave loop
+## Phase 2 — Wave loop  `deliver:waveloop`
 
 The wave loop is the core mechanism. Its authoritative description is [references/integration-branch.md](references/integration-branch.md). The four steps:
 
@@ -65,7 +65,7 @@ An item with `serialize: true` runs alone — no parallel build mates for that s
 
 **Step 3 — Barrier, then serial merge.** Wait for all wave builds to complete or halt (barrier). Then process passing items one at a time through the serial merge queue from [references/integration-branch.md](references/integration-branch.md): each item re-validates its oracle against the **current** integration tip (which may have advanced as wave-mates merged), then merges. On conflict or re-validation failure, do a bounded rebuild against the new tip or halt.
 
-Before the merge pass, tag `kargha/<slug>/wave-<N>-base` on the pre-merge integration tip — this is the revert anchor for partial-wave failure (see Phase 4).
+Before the merge pass, tag `kargha/<slug>/wave-<N>-base` on the pre-merge integration tip — this is the revert anchor for partial-wave failure (see `deliver:lifecycle`).
 
 After each merge: write `refs/kargha/<slug>/item-<id>/done` → the merge commit.
 
@@ -75,18 +75,18 @@ Repeat the loop for the next frontier until all items are built or a halt stops 
 
 ---
 
-## Phase 3 — Env binding
+## Phase 3 — Env binding  `deliver:env`
 
 Start the project's env (`env_contract.command`) **once per wave**, before the wave's builds dispatch. Per [references/binder-reference.md](references/binder-reference.md):
 
 - When `env_contract.supports_isolation` is true, inject `env_contract.isolation_params` (e.g. `PORT`, `COMPOSE_PROJECT_NAME`) per item so concurrent builds get isolated environments.
-- When `supports_isolation` is false, items that need a stateful env are serialized — running them concurrently would produce interference. The gate in Phase 2 catches this.
+- When `supports_isolation` is false, items that need a stateful env are serialized — running them concurrently would produce interference. The gate in the wave loop (`deliver:waveloop`) catches this.
 
 Tear the wave env down once at the end of the wave, after the post-wave check (Step 4). Do not tear it down on partial failure — the post-wave check still needs it. When `kargha-build` runs a visual oracle and uses the wave env, it must not tear it down itself (the orchestrator owns the lifecycle). Per [references/integration-branch.md](references/integration-branch.md), `kargha-build` leaves a provided wave env alone.
 
 ---
 
-## Phase 4 — Lifecycle
+## Phase 4 — Lifecycle  `deliver:lifecycle`
 
 **Partial-wave failure.** When one or more items halt during a wave:
 
@@ -101,11 +101,11 @@ Tear the wave env down once at the end of the wave, after the post-wave check (S
 - Tear down any wave env this run started.
 - **Preserve the failing item's worktree and print its path.** The user needs it to diagnose and retry.
 
-Committed item branches and the integration branch persist. A later `kargha-deliver` run detects them via Phase 0 and offers to resume.
+Committed item branches and the integration branch persist. A later `kargha-deliver` run detects them via preflight (`deliver:preflight`) and offers to resume.
 
 ---
 
-## Phase 5 — Cost education
+## Phase 5 — Cost education  `deliver:cost`
 
 When the binder scope is large (many items, estimates of L, or long dependency chains), echo the plan-time cost note before the wave loop starts:
 
@@ -115,7 +115,7 @@ This is education, not a gate. The user may proceed immediately. If they do, sta
 
 ---
 
-## Phase 6 — Report back
+## Phase 6 — Report back  `deliver:report`
 
 After the final wave (or halt), report:
 
@@ -131,8 +131,8 @@ After the final wave (or halt), report:
 - **Build-parallel, merge-serial-with-revalidation.** Concurrent builds save time; serial merging with oracle re-validation keeps the integration tip correct. "Serial" is fast (a FIFO queue), not free (each item re-checks its oracle against the tip that just moved).
 - **The binder is immutable while a wave runs.** You can edit the binder between waves (then re-validate it), but not while a wave is in flight.
 - **Backlog curation is the user's job.** kargha-deliver executes the binder as written. It does not add, remove, or reorder work items — that is `kargha-plan`'s job.
-- **Resume is git-native.** No state file. kargha recovers from the tags and refs in the `kargha/<slug>/` and `refs/kargha/<slug>/` namespace per [references/integration-branch.md](references/integration-branch.md). Phase 0 detects them; the user chooses to resume or clear.
-- **The human enters delivery only on escalation.** The safety gate caps at 3 attempts and escalates; the acceptance gate caps at 2 and halts with a call to action. Outside those caps, kargha self-corrects. The user is not consulted mid-wave except on partial-wave failure (their choice to revert or continue) or a Phase 0 resume/clear prompt.
+- **Resume is git-native.** No state file. kargha recovers from the tags and refs in the `kargha/<slug>/` and `refs/kargha/<slug>/` namespace per [references/integration-branch.md](references/integration-branch.md). Preflight (`deliver:preflight`) detects them; the user chooses to resume or clear.
+- **The human enters delivery only on escalation.** The safety gate caps at 3 attempts and escalates; the acceptance gate caps at 2 and halts with a call to action. Outside those caps, kargha self-corrects. The user is not consulted mid-wave except on partial-wave failure (their choice to revert or continue) or a `deliver:preflight` resume/clear prompt.
 - **A single-item binder skips deliver.** Hand directly to `kargha-build`. There is no wave to schedule, no integration branch to assemble across items.
 - **No PR — ever.** The terminal state is a tagged, assembled integration branch. No `gh`/`glab`/`tea`, no review transition.
 - **Post-wave check reverts on failure.** The pre-merge tag (`wave-<N>-base`) is the revert anchor. A semantic collision the floor missed (e.g. two items independently modifying the same helper) is caught here, not silently merged.

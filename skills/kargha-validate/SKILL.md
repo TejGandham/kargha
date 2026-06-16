@@ -34,7 +34,7 @@ For alternate theme contexts, the caller provides navigation/context-switch step
 
 ## Workflow
 
-### Phase 0 — Prerequisites
+### Phase 0 — Prerequisites  `validate:prereq`
 
 All checks are hard gates. Fail with a clear report rather than prompting.
 
@@ -45,14 +45,14 @@ All checks are hard gates. Fail with a clear report rather than prompting.
    uv run <skill-dir>/scripts/serve_design.py --self-test
    ```
 
-   Then use the same script in Phase 1 with the caller's design path. If it cannot resolve an HTML file, stop with: "No design HTML files found at `<path>`. Provide a Claude Design OR runtime-JSX design HTML export."
+   Then use the same script in the serve step (`validate:serve`) with the caller's design path. If it cannot resolve an HTML file, stop with: "No design HTML files found at `<path>`. Provide a Claude Design OR runtime-JSX design HTML export."
 
 3. **App dev server is already running.** The caller owns the app server lifecycle. Use a host-native HTTP check or let `capture_view.py` fail on navigation. Do not start the app server here.
 4. **`playwright-cli` is available.** `capture_view.py` checks this before capture. If it is missing, the script exits non-zero with an actionable install CTA — the two-step `npm install -g @playwright/cli@latest` then `playwright-cli install --skills`, plus the docs link. Surface that message and stop; this stays a hard gate (no prompting, no auto-install, no degraded capture).
 
 Do not assume Bash, WSL, `/tmp`, `curl`, `grep`, `find`, `lsof`, `kill`, or POSIX background syntax.
 
-### Phase 1 — Serve the design HTML
+### Phase 1 — Serve the design HTML  `validate:serve`
 
 Start the design server as a managed background process/session with the bundled script:
 
@@ -68,9 +68,9 @@ The script:
 - writes JSON metadata containing `design_file`, `design_url`, `port`, and `metadata`
 - verifies the design URL returns HTTP 200 before reporting readiness
 
-Keep the process handle so Phase 4 can stop it. Read `design_url` from the metadata file or the script's first JSON stdout line.
+Keep the process handle so cleanup (`validate:cleanup`) can stop it. Read `design_url` from the metadata file or the script's first JSON stdout line.
 
-### Phase 2 — Capture worker
+### Phase 2 — Capture worker  `validate:capture`
 
 Use a capture subagent OR host worker for mechanical capture only. It does not compare and does not suggest fixes.
 
@@ -107,9 +107,9 @@ APP_HEALTH: DEGRADED_AUTH
 compare_ready: false
 ```
 
-Do not compare a login screen against the target design. Return the blocked-auth report in Phase 3 and ask the caller/build skill for authenticated session setup.
+Do not compare a login screen against the target design. Return the blocked-auth report in the comparison worker (`validate:compare`) and ask the caller/build skill for authenticated session setup.
 
-### Phase 3 — Comparison worker
+### Phase 3 — Comparison worker  `validate:compare`
 
 Use a separate comparison subagent OR fresh host-worker pass with only the capture JSON and any caller focus areas. It has not seen the app code, design files, or pipeline state.
 
@@ -183,11 +183,11 @@ ACCEPTANCE: <pass | fail>   ← include ONLY when oracle assertions were provide
 
 Do not add `RECOMMENDATIONS`, `FIXES`, code suggestions, or implementation instructions to the schema. If a worker suggests fixes, strip them before returning the report.
 
-### Phase 4 — Cleanup
+### Phase 4 — Cleanup  `validate:cleanup`
 
-Always stop only the design server process started in Phase 1. Close the `playwright-cli` named session defensively if the capture worker failed before cleanup. Remove temporary capture artifacts only with host-native filesystem operations and only for paths created by this run.
+Always stop only the design server process started in the serve step (`validate:serve`). Close the `playwright-cli` named session defensively if the capture worker failed before cleanup. Remove temporary capture artifacts only with host-native filesystem operations and only for paths created by this run.
 
-The final output is the structured report from Phase 3. Do not modify app files, design files, or ticket files.
+The final output is the structured report from the comparison worker (`validate:compare`). Do not modify app files, design files, or ticket files.
 
 ## Gotchas
 

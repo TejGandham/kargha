@@ -19,7 +19,7 @@ The caller must supply:
 - **Binder path + work item id** — locates the `oracle`, `assertions`, and optional `contract` for the item. The binder is a JSON file at `.kargha/binders/<slug>.json` by default; see `references/binder-reference.md`.
 - **Diff range** — the item's branch versus the integration tip (e.g. `kargha/<slug>/WI01..kargha/<slug>/integration`).
 
-## Phase 0 — Prerequisites
+## Phase 0 — Prerequisites  `verify:prereq`
 
 Before dispatching either agent:
 
@@ -27,7 +27,7 @@ Before dispatching either agent:
 2. Resolve the **pre-verify env command** bound to this wave: read `env_contract.command` from the binder (see `references/verification-gate.md` and `references/binder-reference.md`). If the oracle's assertions need an environment to run and no env command is present, halt with a clear message naming the missing contract — this is a hard gate.
 3. Check the floor: if the diff cannot clear compile / type-check / lint, do not dispatch the agents. Surface the item for human review and halt. The floor is defined in `references/definition-of-done.md`.
 
-## Phase 1 — Acceptance + contract conformance
+## Phase 1 — Acceptance + contract conformance  `verify:acceptance`
 
 Dispatch **`agents/kargha-acceptance-reviewer`** with the worktree path, binder path, work item id, and diff range.
 
@@ -42,9 +42,9 @@ The agent reads the binder on disk, dispositions each `oracle.assertions[i]` as 
 
 **On SPEC-SUSPECT:** halt for human adjudication immediately. Do not loop; do not kick back. The binder is amended through kargha-plan, never by this gate.
 
-**On BLOCKED:** halt with the blocking reason; do not proceed to Phase 2.
+**On BLOCKED:** halt with the blocking reason; do not proceed to the boundary scan (`verify:boundary`).
 
-## Phase 2 — Boundary scan
+## Phase 2 — Boundary scan  `verify:boundary`
 
 Dispatch **`agents/kargha-safety-auditor`** with the same inputs: worktree path, binder path, work item id, and diff range.
 
@@ -58,17 +58,17 @@ The agent re-runs the seven smart-surfaced-review signals (see `references/smart
 
 **On BLOCKED:** halt with the blocking reason.
 
-Phase 2 runs after Phase 1 resolves to CONFORMANT (or is skipped on SPEC-SUSPECT/BLOCKED halt). The two agents run sequentially in the common path; if Phase 1 loops, Phase 2 does not start until Phase 1 clears or exhausts its cap.
+The boundary scan (`verify:boundary`) runs after acceptance (`verify:acceptance`) resolves to CONFORMANT (or is skipped on SPEC-SUSPECT/BLOCKED halt). The two agents run sequentially in the common path; if `verify:acceptance` loops, `verify:boundary` does not start until `verify:acceptance` clears or exhausts its cap.
 
-## Phase 3 — Aggregate verdict
+## Phase 3 — Aggregate verdict  `verify:aggregate`
 
 Combine both agents' return envelopes into a single verdict:
 
 | Acceptance result | Safety result | Aggregate |
 |-|-|-|
 | CONFORMANT | PASS | `pass` |
-| CONFORMANT | VIOLATION (cap not exhausted) | loop Phase 2 |
-| DEVIATION (cap not exhausted) | — | loop Phase 1 |
+| CONFORMANT | VIOLATION (cap not exhausted) | loop `verify:boundary` |
+| DEVIATION (cap not exhausted) | — | loop `verify:acceptance` |
 | Either cap exhausted | — | `blocked` (halt-with-CTA or escalate per cap rules) |
 | SPEC-SUSPECT or BLOCKED | — | `blocked` (halt for human) |
 

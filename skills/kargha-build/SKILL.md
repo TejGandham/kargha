@@ -11,7 +11,7 @@ The binder (`.kargha/binders/<slug>.json`) is the cross-skill contract. Each wor
 
 kargha-build is **stack-agnostic**. It does not assume a frontend framework, component library, data layer, branch convention, or repo layout. It resolves a small set of project settings up front (detect → ask), then implements the item against whatever it finds. Where this document shows a concrete tool, command, or library, treat it as an **example**, not a requirement.
 
-The UI-specific machinery — component maps, icon imports, token rules, the data-layer conformance loop (Phase 5b), the dev-server lifecycle for the visual gate (Phases 6–7), and the visual design-validation loop — is a **conditional annex** that applies only when the work item carries those fields (`component_map`, `icon_map`, `token_changes`), a data-layer surface, or a `visual` oracle. A backend / CLI / data / IaC item skips the entire annex.
+The UI-specific machinery — component maps, icon imports, token rules, the data-layer conformance loop (`build:datalayer`), the dev-server lifecycle for the visual gate (the acceptance loop's bring-up `build:acceptance` and its teardown `build:teardown`), and the visual design-validation loop — is a **conditional annex** that applies only when the work item carries those fields (`component_map`, `icon_map`, `token_changes`), a data-layer surface, or a `visual` oracle. A backend / CLI / data / IaC item skips the entire annex.
 
 ## Project configuration (resolve once, up front)
 
@@ -23,7 +23,7 @@ Resolve each setting in this order: **explicit user input → detect from the re
 | **Toolchain commands** | install / lint / test / build / typecheck invocations | Detect from package scripts + task runner (npm/pnpm/yarn, Make, Nx, Turbo, Cargo, Poetry, …); record `<install command>`, `<lint command>`, `<test command>`, `<build command>`, `<typecheck command>`. When both package scripts and a task runner exist, prefer the project's documented entrypoint — a bare script pick can skip orchestrated lint/coverage the runner bundles |
 | **Env command** | The dev/test env command and its isolation params | Read the binder's `env_contract` (`command`, `supports_isolation`, `isolation_params`); see [references/integration-branch.md](references/integration-branch.md) for env injection |
 | **Default branch** | The repo's mainline (only the fallback base, not the build base) | Detect via `git remote show origin` (the `HEAD branch:` line), else whichever of `main`/`master` exists. Don't rely on `git symbolic-ref refs/remotes/origin/HEAD` — it's unset on many fresh clones |
-| **Integration branch** | The binder's integration branch and its worktree | `kargha/<slug>/integration`, where `<slug>` is the binder's `slug` field. This — not the default branch — is the base for the item's worktree (see Phase 4) |
+| **Integration branch** | The binder's integration branch and its worktree | `kargha/<slug>/integration`, where `<slug>` is the binder's `slug` field. This — not the default branch — is the base for the item's worktree (see `build:implement`) |
 | **Worktree root** | Parent dir for per-item worktrees | Ask/default to a sibling dir (e.g. `../<repo>-worktrees/`) |
 | **Git identity** | Author identity for commits | `git config user.name` / `user.email`. If unset, ask once or record an explicit "unattributed" note — do not silently invent one. This is **commit authorship only**, not a ticketing identity |
 | **Project rules** | Component-structure, data-layer, and convention docs | Detect: contributor docs, lint configs, rules files; cite them during implementation/fixes if present, else fall back to inline generic conventions |
@@ -54,13 +54,13 @@ When the theme/token row detects a **W3C DTCG-format design-token file system** 
 
 ### Always-on mutation guard
 
-Before any file mutation, apply [references/worktree-safety.md](references/worktree-safety.md): assert the intended root with `git rev-parse --show-toplevel`, check the current branch with `git branch --show-current`, and refuse implementation edits when the root or branch is wrong. Repeat this after creating a worktree, changing directories, resuming after context compaction, or any failed patch. After Phase 4 creates the worktree, the intended root is the implementation worktree, not the original checkout. The binder is **read-only** to build — never edit it.
+Before any file mutation, apply [references/worktree-safety.md](references/worktree-safety.md): assert the intended root with `git rev-parse --show-toplevel`, check the current branch with `git branch --show-current`, and refuse implementation edits when the root or branch is wrong. Repeat this after creating a worktree, changing directories, resuming after context compaction, or any failed patch. After the worktree is created (`build:implement`), the intended root is the implementation worktree, not the original checkout. The binder is **read-only** to build — never edit it.
 
-### Phase 0 — Classify intent before choosing a workflow
+### Phase 0 — Classify intent before choosing a workflow  `build:classify`
 
 Classify the request before framing the work:
 
-- **implementation of a binder work item** — normal `kargha-build` execution (Phase 1 onward)
+- **implementation of a binder work item** — normal `kargha-build` execution (from `build:gate` onward)
 - **inspection aid** — behavior works, but the user needs to see or hold a state such as a login screen
 - **bug fix** — behavior is broken or regressed
 - **product feature** — new behavior not already in the binder
@@ -71,7 +71,7 @@ If the user corrects the category, drop the old framing immediately. For inspect
 **Ticketless inspection-aid mode.** If the request is a narrow inspection aid and no binder work item drives it, do not force the binder gates. Use this limited flow:
 
 1. Resolve the app dir/target, toolchain, default branch, worktree root, and relevant project rules from Project configuration.
-2. State the high-impact mutation preview from Phase 4 and wait for confirmation before editing.
+2. State the high-impact mutation preview from `build:implement` and wait for confirmation before editing.
 3. Create an isolated worktree from the default branch with a branch like `inspect_<short-slug>`.
 4. Run the mutation guard before every edit.
 5. Implement only the confirmed inspection aid.
@@ -80,7 +80,7 @@ If the user corrects the category, drop the old framing immediately. For inspect
 
 This mode is for observability/inspection only. If the change becomes product behavior, convert it to a binder work item or an explicit product-feature request.
 
-### Phase 1 — Input, validate, and gate the work item
+### Phase 1 — Input, validate, and gate the work item  `build:gate`
 
 The input is `(binder path, work-item id)` — **not** a ticket file. Resolve both from the user (default binder location `.kargha/binders/<slug>.json`; see [references/binder-reference.md](references/binder-reference.md)).
 
@@ -109,7 +109,7 @@ This checks schema validity, dependency cycles, and dangling `depends_on` refere
 - `SERIALIZE` / `SHARED_RESOURCES` — `serialize` and `shared_resources`, if present (the orchestrator's concern, but note them)
 - UI annex fields, **only if present**: `COMPONENT_MAP` (`component_map`), `ICON_MAP` (`icon_map`), `TOKEN_CHANGES` (`token_changes`), `DESIGN_REFERENCE` (`design_reference`), and the binder's `design_facts.source`
 
-### Phase 2 — Sanity-check the item against the codebase
+### Phase 2 — Sanity-check the item against the codebase  `build:sanity`
 
 Read the work item and the binder's `scope`, `design_facts`, and `env_contract`. Then verify the item against the current code:
 
@@ -125,9 +125,9 @@ If a mismatch matters, flag it and ask. Minor drift gets silently adapted and no
 
 ### Phase 3 — (reserved)
 
-No pickup side-effects exist in the binder model — there is no status to transition and no assignee to set. Progress is tracked git-natively through commit markers, wave tags, and the `refs/kargha/` namespace (see [references/integration-branch.md](references/integration-branch.md)). Proceed to Phase 4.
+No pickup side-effects exist in the binder model — there is no status to transition and no assignee to set. Progress is tracked git-natively through commit markers, wave tags, and the `refs/kargha/` namespace (see [references/integration-branch.md](references/integration-branch.md)). Proceed to `build:implement`.
 
-### Phase 4 — Create an isolated worktree off the integration tip and implement
+### Phase 4 — Create an isolated worktree off the integration tip and implement  `build:implement`
 
 **The item gets its own git worktree, branched off the current integration tip** — not the default branch. This is what resolves dependency chains: the integration tip already contains every merged dependency.
 
@@ -181,7 +181,7 @@ Immediately after `cd "$worktree"`, run the mutation guard from [references/work
 
 All subsequent phases run from inside the worktree. Stay `cd`'d there until the skill finishes.
 
-### Phase 5 — Deterministic gate (the floor)
+### Phase 5 — Deterministic gate (the floor)  `build:floor`
 
 Run from the worktree before the acceptance loop. This is the floor under every non-opted-out item — compile / type-check / lint clean (see [references/definition-of-done.md](references/definition-of-done.md)):
 
@@ -196,17 +196,17 @@ Run whichever of these the project defines. If any fails, fix it in this thread 
 
 **UI annex — token-conformance check (DTCG only, single pass folded into this phase, never a loop).** When the DTCG token settings were resolved, run the deterministic three-check scan (generated-artifact reproducibility; no primitive-tier consumption in new code; no hardcoded duplicates of existing tokens), scoped to files changed vs the integration tip. Stage new files first (`git add -A`). Full definitions in **[references/dtcg-tokens.md](references/dtcg-tokens.md)**.
 
-### Phase 5b — Data-layer conformance loop (conditional UI/data, up to 3 rounds)
+### Phase 5b — Data-layer conformance loop (conditional UI/data, up to 3 rounds)  `build:datalayer`
 
 **Conditional — UI/data items only.** This phase runs **only when the project has a data layer** (e.g. GraphQL with fragment colocation/codegen, or REST/OpenAPI/tRPC) **and** the item's changed files contain data operations. **Skip the entire phase** when there is no data layer at all, or when no changed file contains a data operation (computed in 5b-1). A backend/CLI/IaC item with no data-layer surface skips it outright. A missing conventions doc is **not** a skip trigger: when a data layer exists but no rules doc was resolved, still run the loop and fall back to the inline read-only pass in 5b-3 (against whatever conventions the repo documents; if truly none, check only that data operations are typed — no `any` — and not duplicated, and note the thin coverage in the report).
 
-This is a UI/data-specific check, distinct from the generic acceptance gate (Phase 6). It validates that created or modified components follow the project's data-layer conventions (for GraphQL: fragment colocation, fragment/operation naming, imports per the project's GraphQL rules, query/mutation tier boundaries; for other layers: schema conformance, typed-client usage) — citing the project's resolved data-layer rules doc where present — before the visual gate and the merge.
+This is a UI/data-specific check, distinct from the generic acceptance gate (`build:acceptance`). It validates that created or modified components follow the project's data-layer conventions (for GraphQL: fragment colocation, fragment/operation naming, imports per the project's GraphQL rules, query/mutation tier boundaries; for other layers: schema conformance, typed-client usage) — citing the project's resolved data-layer rules doc where present — before the visual gate and the merge.
 
 #### 5b-1. Identify target files
 
 Only validate files created or modified **in this item** that contain data-layer operations. Use the resolved `<data-layer-detector>` from Project configuration — the literal `graphql(` is just the GraphQL example; for REST/tRPC the detector is "files importing the client or calling the typed endpoints." Anchor on the resolved detector, not the example token. Exclude generated code (the `<generated-code-dir>`, if any) and test files.
 
-Compute the changed-file set **relative to the current integration tip** — the item branched off integration (Phase 4), so the integration branch is the base, **not** the default branch. Stage new files first (`git add -A`) so untracked, just-created files are included, then enumerate changed files relative to the integration tip:
+Compute the changed-file set **relative to the current integration tip** — the item branched off integration (`build:implement`), so the integration branch is the base, **not** the default branch. Stage new files first (`git add -A`) so untracked, just-created files are included, then enumerate changed files relative to the integration tip:
 
 ```bash
 integration="kargha/<slug>/integration"
@@ -220,14 +220,14 @@ Filter the result in memory or with the host's native tools, keeping only files 
 - are not test/spec files
 - contain the resolved `<data-layer-detector>` pattern or import
 
-Use a repo-owned helper script when this logic becomes non-trivial; do not assume Bash pipelines, `grep`, `find`, or WSL exist locally. This produces a list of modified source files (excluding generated code and tests) that contain data-layer operations. If the list is empty, log "No data-layer files modified — skipping data-layer validation" and proceed to Phase 6.
+Use a repo-owned helper script when this logic becomes non-trivial; do not assume Bash pipelines, `grep`, `find`, or WSL exist locally. This produces a list of modified source files (excluding generated code and tests) that contain data-layer operations. If the list is empty, log "No data-layer files modified — skipping data-layer validation" and proceed to the acceptance loop (`build:acceptance`).
 
 #### 5b-2. Per-round structure
 
 ```
 round = 1
 while round <= 3:
-  # Re-run the floor if we made fixes (skip for round 1 — Phase 5 already passed)
+  # Re-run the floor if we made fixes (skip for round 1 — the floor `build:floor` already passed)
   if round > 1:
     run <lint command> && <test command>
     if fail: fix, re-run lint/test
@@ -280,7 +280,7 @@ When fixing issues between rounds:
 - **All issues are in generated code:** shouldn't happen (generated code is excluded in 5b-1), but if it does, treat as a pass.
 - **A file was deleted between rounds:** re-compute the target file list before each round to avoid passing stale paths.
 
-### Phase 6 — Acceptance loop
+### Phase 6 — Acceptance loop  `build:acceptance`
 
 Once the floor is clean, run the item's acceptance check through the verification gate. The gate is **read-only** — it reports, it never edits — and it runs in a fresh, thin context (only the worktree, the binder, and the item's `oracle`/`contract`). See [references/verification-gate.md](references/verification-gate.md).
 
@@ -298,9 +298,9 @@ Once the floor is clean, run the item's acceptance check through the verificatio
 Do not assume Bash, WSL, POSIX background syntax, `/tmp`, `curl`, `grep`, `lsof`, or `kill` exist on the developer machine. Use the host's native process and HTTP facilities, or a repo-owned helper script, and record the exact command/handle you used.
 
 - **6-dev-a. Check port availability** with a host-native mechanism (a Python socket probe, a PowerShell TCP lookup, the project's dev-server status command, or the platform's equivalent). Check both `<dev-server-port>` and `<backend-port>` when the dev target starts a backend. **If something is already on either port, bail and ask the user to stop it first — never stop another process's dev server.** (This guards against *other* processes. When you must **restart** your own dev server — e.g. after a token rebuild or a degraded server mid-loop — first stop the recorded handle to free the port, then repeat these steps; otherwise this check sees your own still-running server and bails.)
-- **6-dev-b. Start the dev server as a managed background process/session.** Record its process id or host process handle (call it `DEV_SERVER_PID` or the host equivalent), plus its log location. Do not use POSIX `&` unless the host shell is known to support it. If the dev target transitively starts a backend/API service (resolved in Project configuration), that service comes up on `<backend-port>` too — both are needed when the view depends on the backend for data. Note that port for teardown in Phase 7.
-- **6-dev-c. Health-poll the actual `design_reference` route** (not just `/`) with a host-native HTTP client until it returns an expected status such as `200`, `307`, or `308` — many dev servers compile/warm pages on demand, so `/` warming proves nothing about the target view. Use an explicit retry limit around **60 seconds** and capture failure output. If the route is not responding after ~60s, stop the recorded handle and bail with the error (common causes: port conflict, a build error the floor didn't catch, missing env vars). **A bare 2xx/3xx is not proof the view rendered when it's behind auth** — an unauthenticated request to a protected route can return `200` on a login page or `3xx` to `/login`, passing this poll while the target view is still unreachable. If the route requires authentication, detect the auth-redirect / login-page response here and treat establishing a logged-in session (and ensuring any backend service the view needs is up) as a `kargha-validate` prerequisite, not something this poll satisfies — see [references/design-validation-loop.md](references/design-validation-loop.md) (7a).
-- **6-dev-d. Store the recorded handle** (`DEV_SERVER_PID` and `<backend-port>`, if any) for the Phase 7 teardown.
+- **6-dev-b. Start the dev server as a managed background process/session.** Record its process id or host process handle (call it `DEV_SERVER_PID` or the host equivalent), plus its log location. Do not use POSIX `&` unless the host shell is known to support it. If the dev target transitively starts a backend/API service (resolved in Project configuration), that service comes up on `<backend-port>` too — both are needed when the view depends on the backend for data. Note that port for the teardown (`build:teardown`).
+- **6-dev-c. Health-poll the actual `design_reference` route** (not just `/`) with a host-native HTTP client until it returns an expected status such as `200`, `307`, or `308` — many dev servers compile/warm pages on demand, so `/` warming proves nothing about the target view. Use an explicit retry limit around **60 seconds** and capture failure output. If the route is not responding after ~60s, stop the recorded handle and bail with the error (common causes: port conflict, a build error the floor didn't catch, missing env vars). **A bare 2xx/3xx is not proof the view rendered when it's behind auth** — an unauthenticated request to a protected route can return `200` on a login page or `3xx` to `/login`, passing this poll while the target view is still unreachable. If the route requires authentication, detect the auth-redirect / login-page response here and treat establishing a logged-in session (and ensuring any backend service the view needs is up) as a `kargha-validate` prerequisite, not something this poll satisfies — see [references/design-validation-loop.md](references/design-validation-loop.md) (`dvl:invoke:auth`).
+- **6-dev-d. Store the recorded handle** (`DEV_SERVER_PID` and `<backend-port>`, if any) for the teardown (`build:teardown`).
 
 **Kickback and caps.** On any finding, the gate kicks the work back to this skill for **bounded self-correction**, then re-runs on the corrected diff. Per [references/verification-gate.md](references/verification-gate.md) the caps differ by gate:
 
@@ -309,17 +309,17 @@ Do not assume Bash, WSL, POSIX background syntax, `/tmp`, `curl`, `grep`, `lsof`
 
 Only on cap exhaustion does the gate halt or escalate — otherwise it self-corrects within the caps and moves on.
 
-### Phase 7 — Dev-server teardown (cleanup for the visual gate)
+### Phase 7 — Dev-server teardown (cleanup for the visual gate)  `build:teardown`
 
-**Conditional — visual items that started a dev server.** A non-visual item is a no-op here. **Always runs when this run started a server**, regardless of outcome — whether the skill succeeded, failed at a gate, or errored after bring-up, the ports it opened must be freed. Structure the teardown to run on every exit path after Phase 6's bring-up.
+**Conditional — visual items that started a dev server.** A non-visual item is a no-op here. **Always runs when this run started a server**, regardless of outcome — whether the skill succeeded, failed at a gate, or errored after bring-up, the ports it opened must be freed. Structure the teardown to run on every exit path after the acceptance loop's bring-up (`build:acceptance`).
 
 Stop **only the process or process tree this run started**, using the host's native process handle (the `DEV_SERVER_PID` recorded in 6-dev-b/d). If the port is still held afterward, clean up an orphan only when you can prove it was spawned by this run's recorded dev command — **never stop an unrelated process** that happens to bind the same port (the mirror of 6-dev-a's "do not stop another process's dev server"). Apply the same guard to `<backend-port>` when the dev target started a backend/API service: stop only what this run started, then free the backend port too.
 
-**Do not tear down a provided env.** When Phase 6 used a wave-bound env from the binder's `env_contract` / the orchestrator instead of starting its own server, leave it running — the orchestrator owns its lifecycle and tears it down once for the whole wave (see [references/integration-branch.md](references/integration-branch.md)). This phase only stops servers *this run* started. If the skill exited before Phase 6 brought up a server (e.g. at a Phase 1 gate), this phase is a no-op. (Port-conflict and process-handling details also live in [references/design-validation-loop.md](references/design-validation-loop.md).)
+**Do not tear down a provided env.** When the acceptance loop (`build:acceptance`) used a wave-bound env from the binder's `env_contract` / the orchestrator instead of starting its own server, leave it running — the orchestrator owns its lifecycle and tears it down once for the whole wave (see [references/integration-branch.md](references/integration-branch.md)). This phase only stops servers *this run* started. If the skill exited before the acceptance loop (`build:acceptance`) brought up a server (e.g. at the input gate `build:gate`), this phase is a no-op. (Port-conflict and process-handling details also live in [references/design-validation-loop.md](references/design-validation-loop.md).)
 
 ### Phase 8 — (reserved)
 
-### Phase 9 — Commit, secret-scan, and merge into integration — NO PR
+### Phase 9 — Commit, secret-scan, and merge into integration — NO PR  `build:merge`
 
 Run from inside the worktree. There is **no PR**. The terminal state is a tagged item merged into the integration branch; the user reviews and merges that branch.
 
@@ -340,7 +340,7 @@ Run from inside the worktree. There is **no PR**. The terminal state is a tagged
 
 **Do not open a PR.** No `gh`/`glab`/`tea`, no push-to-review, no review-status transition.
 
-### Phase 10 — Report back
+### Phase 10 — Report back  `build:report`
 
 Brief summary to the user (~8 lines):
 
@@ -367,11 +367,11 @@ Brief summary to the user (~8 lines):
 - **Secret scan before every commit.** It inspects the staged diff and blocks on a hit. Block, surface, mark failed, preserve the worktree — don't write the commit.
 - **Acceptance caps differ on purpose.** Safety/boundary gate: 3 attempts then escalate to the human. Acceptance/contract gate: 2 attempts then halt-with-CTA. The gate kicks findings back to build for bounded self-correction; only exhaustion halts.
 - **Re-validate the oracle against the merged tip.** A text-clean merge can still break semantics (a wave-mate renamed a helper). The acceptance check must pass on what lands, not on the pre-merge branch.
-- **Always work in the worktree.** After Phase 4, every implementation path resolves under the worktree root. The mutation guard in [references/worktree-safety.md](references/worktree-safety.md) is mandatory before every edit.
+- **Always work in the worktree.** After the worktree is created (`build:implement`), every implementation path resolves under the worktree root. The mutation guard in [references/worktree-safety.md](references/worktree-safety.md) is mandatory before every edit.
 - **Don't clobber an existing worktree.** If `git worktree add` fails, stop and ask — it usually means a resumable prior run.
 - **UI rules are conditional.** Component maps, icon imports, token rules, and the visual `kargha-validate` loop apply only when the item carries `component_map` / `icon_map` / `token_changes` or a `visual` oracle. A backend / CLI / data / IaC item skips the whole annex.
 - **The visual gate is expensive.** Each `kargha-validate` round can spawn a browser session and capture/compare workers; the loop is capped — don't exceed it.
-- **Data-layer conformance is read-only and isolated.** The Phase 5b loop runs a separate read-only subagent/host worker so the implementer doesn't grade its own work; the validator returns a `STATUS` + `Issues found: N` contract the loop parses. It's conditional — no data layer, or no changed file with a data op, skips it. Compute the changed-file set vs the **integration tip**, not the default branch.
+- **Data-layer conformance is read-only and isolated.** The data-layer conformance loop (`build:datalayer`) runs a separate read-only subagent/host worker so the implementer doesn't grade its own work; the validator returns a `STATUS` + `Issues found: N` contract the loop parses. It's conditional — no data layer, or no changed file with a data op, skips it. Compute the changed-file set vs the **integration tip**, not the default branch.
 - **The visual gate needs the app up — and the route, not `/`.** Health-poll the actual `design_reference` route (200/307/308, ~60s cap); a 2xx/3xx on a protected route can be the login page, not the view. Honor a provided wave env (`env_contract`/orchestrator) when present; else manage the dev server yourself.
 - **Never stop another process's dev server.** Bring-up bails if a port is already taken; teardown stops only the handle this run recorded (frontend and backend ports), and leaves a wave-bound env alone — the orchestrator owns that one. Teardown runs on every exit path after bring-up.
 - **Declare deferrals inline.** A skipped test or stubbed dependency gets a `KARGHA-DEFER` marker at the site; the report surfaces every one. A deferred item is never reported as fully done without its list.

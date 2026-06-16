@@ -56,11 +56,11 @@ Resolved UI values feed the binder's `design_facts` and each work item's `compon
 
 ## Workflow
 
-### Phase 0 — Ingest intent (light gate)
+### Phase 0 — Ingest intent (light gate)  `plan:ingest`
 
 Accept a problem or feature description as the only hard requirement. Optionally accept a path to a design mock or non-functional prototype. Some statement of intent is required — if the user provides nothing, ask once.
 
-**Repo detect (light, never blocking).** Check for a recognizable repo layout to resolve the binder's landing path and later feed Phase 1. Never fail on an unfamiliar structure.
+**Repo detect (light, never blocking).** Check for a recognizable repo layout to resolve the binder's landing path and later feed the repo survey (`plan:survey`). Never fail on an unfamiliar structure.
 
 **UI-format gate (conditional).** When the input includes a design file path, check whether it is a Claude Design or runtime-JSX export: verify that `.jsx` siblings exist or the HTML contains a `<script type="text/babel">` block. If the check fails, tell the user what was found and ask them to re-export or point at the `.jsx` sources. Only run this check when a design file is provided; a plain text description has no format to gate.
 
@@ -68,7 +68,7 @@ Accept a problem or feature description as the only hard requirement. Optionally
 
 ---
 
-### Phase 1 — Best-effort repo + stack understanding (Explore subagent)
+### Phase 1 — Best-effort repo + stack understanding (Explore subagent)  `plan:survey`
 
 Use an **Explore subagent** OR an inline read-only pass to survey the repo.
 
@@ -90,9 +90,9 @@ Report with `file:line` citations.
 
 **UI annex — full design analysis (conditional).** When the resolved stack has a UI surface — a design mock or non-functional prototype as input, **or** a component-library / token system in the repo — run kargha's full frontend analysis per **[references/ui-analysis.md](references/ui-analysis.md)** instead of the one-line inventory. Keep the Explore-subagent pattern: that reference drives three read-only passes (run them in parallel where the host allows), each citing `file:line`:
 
-- **Design analysis** — component inventory (with props, complexity, state), the component-hierarchy tree, the page/view inventory, the design-token inventory *with values* (per theme context), mock-data shapes, and navigation structure (ui-analysis §1).
-- **Codebase + component-library inventory** — existing components/routes/styles/data-layer/client-state/tests, the component-library catalog, icon libraries, and the theme/token inventory (incl. DTCG tier/path/name from the JSON source, resolved values from the generated output) (ui-analysis §2).
-- **Data-layer mapping** — the type-coverage buckets (matched / gap / unused / exists-but-differs / field-level gap), operation mapping, schema gaps, and fetch-boundary planning (ui-analysis §3).
+- **Design analysis** — component inventory (with props, complexity, state), the component-hierarchy tree, the page/view inventory, the design-token inventory *with values* (per theme context), mock-data shapes, and navigation structure (ui-analysis `ui:design`).
+- **Codebase + component-library inventory** — existing components/routes/styles/data-layer/client-state/tests, the component-library catalog, icon libraries, and the theme/token inventory (incl. DTCG tier/path/name from the JSON source, resolved values from the generated output) (ui-analysis `ui:inventory`).
+- **Data-layer mapping** — the type-coverage buckets (matched / gap / unused / exists-but-differs / field-level gap), operation mapping, schema gaps, and fetch-boundary planning (ui-analysis `ui:datalayer`).
 
 When the token system is W3C DTCG (JSON leaves carrying `$value`/`$type`), also resolve the DTCG-only settings in [references/dtcg-tokens.md](references/dtcg-tokens.md) so the binder's `token_manifest` and each work item's `token_changes` carry tier-correct, build-actionable guidance.
 
@@ -100,20 +100,20 @@ Non-UI stacks skip this annex entirely — the base survey above is all they nee
 
 ---
 
-### Phase 2 — Synthesize the binder (synthesis subagent; main thread owns judgment)
+### Phase 2 — Synthesize the binder (synthesis subagent; main thread owns judgment)  `plan:synthesize`
 
 Decompose the stated intent into work items. Do not delegate this judgment — the synthesis subagent drafts; you review and own the output.
 
 **Subagent brief:**
 
-Given the intent `<intent>` and the repo survey from Phase 1, draft a binder JSON that conforms to [references/binder-reference.md](references/binder-reference.md).
+Given the intent `<intent>` and the repo survey (`plan:survey`), draft a binder JSON that conforms to [references/binder-reference.md](references/binder-reference.md).
 
 For the binder level, populate:
 - `slug` (kebab-case, derived from the feature name)
 - `motivation` (one sentence)
 - `scope.included` and `scope.excluded`
-- `design_facts.source` (path to the design, or null) and `design_facts.stack` (from Phase 1)
-- `env_contract.command`, `env_contract.supports_isolation`, and `env_contract.isolation_params` (from Phase 1)
+- `design_facts.source` (path to the design, or null) and `design_facts.stack` (from `plan:survey`)
+- `env_contract.command`, `env_contract.supports_isolation`, and `env_contract.isolation_params` (from `plan:survey`)
 - `token_manifest` only when the stack has a token system
 
 For each work item, set:
@@ -126,12 +126,12 @@ For each work item, set:
 - `serialize: true` and `shared_resources` for items that must not run in parallel (e.g. DB migrations, lock-file changes).
 - UI-only fields (`design_reference`, `component_map`, `icon_map`, `token_changes`) only when the stack has a design surface. Omit them entirely for backend, CLI, data, and other non-UI stacks.
 
-**For UI items — populate the UI fields from the analysis (conditional).** When the stack has a UI surface, decompose the UI work and fill its fields using **[references/ui-analysis.md](references/ui-analysis.md)** and the Phase 1 analysis it produced:
+**For UI items — populate the UI fields from the analysis (conditional).** When the stack has a UI surface, decompose the UI work and fill its fields using **[references/ui-analysis.md](references/ui-analysis.md)** and the survey (`plan:survey`) analysis it produced:
 
-- Break UI work into items with the **vertical-slice heuristics** (foundation slice if the library/theme isn't integrated; one slice per page/view; split list + detail; complex reusable components; cross-cutting features; modals bundled with their view) — ui-analysis §7.
-- Set `estimate` to the **S/M/L** size from the slice's component count and per-component complexity — ui-analysis §7.
+- Break UI work into items with the **vertical-slice heuristics** (foundation slice if the library/theme isn't integrated; one slice per page/view; split list + detail; complex reusable components; cross-cutting features; modals bundled with their view) — ui-analysis `ui:slice`.
+- Set `estimate` to the **S/M/L** size from the slice's component count and per-component complexity — ui-analysis `ui:slice`.
 - Set `design_reference` to the view/route the slice renders (or `none` for a pure setup/foundation item).
-- Populate `component_map` from the **component-to-library mapping** (Library match / Library + wrapper / Custom / Composite), `icon_map` from the **icon mapping** (primary → fallback → custom SVG, with the Source column and any missing-icon flags), and `token_changes` from the **design-token mapping** (no-consumable-tier-match tokens recorded as semantic-additive entries with per-context values and Auth) — ui-analysis §4–6. Put the shared design→project token map in the binder-level `token_manifest`.
+- Populate `component_map` from the **component-to-library mapping** (Library match / Library + wrapper / Custom / Composite), `icon_map` from the **icon mapping** (primary → fallback → custom SVG, with the Source column and any missing-icon flags), and `token_changes` from the **design-token mapping** (no-consumable-tier-match tokens recorded as semantic-additive entries with per-context values and Auth) — ui-analysis `ui:components`, `ui:icons`, `ui:tokens`. Put the shared design→project token map in the binder-level `token_manifest`.
 
 Non-UI items keep the stack-agnostic synthesis above and carry none of these fields.
 
@@ -152,7 +152,7 @@ Fix gaps in the main thread before proceeding.
 
 ---
 
-### Phase 3 — Smart-surfaced review (the one human-in-the-loop point)
+### Phase 3 — Smart-surfaced review (the one human-in-the-loop point)  `plan:surface`
 
 Per [references/smart-surfaced-review.md](references/smart-surfaced-review.md): compute the seven boundary signals for each work item and write `surface { flagged, signals }` into the binder. When a signal cannot be computed yet (no diff, no path conventions), record `not-computed:<signal-name>` in `surface.signals` rather than giving a clean pass.
 
@@ -166,7 +166,7 @@ Do not surface oracle details for routine, unflagged items — keep the list sho
 
 ---
 
-### Phase 4 — Cost education
+### Phase 4 — Cost education  `plan:cost`
 
 When the binder contains many work items or several large (`L`) estimates, tell the user plainly: this scope will take time and real money before anything tangible lands. Suggest a smaller first slice — the items with no `depends_on` that form the first wave — as a lower-risk starting point.
 
@@ -174,7 +174,7 @@ Educate; do not forbid. If the user wants to proceed with the full scope, move o
 
 ---
 
-### Phase 5 — Emit, validate, and commit
+### Phase 5 — Emit, validate, and commit  `plan:emit`
 
 **Write the binder** to the resolved location (`.kargha/binders/<slug>.json`).
 
@@ -192,7 +192,7 @@ Do not proceed on a validation failure. Fix the binder and re-validate until it 
 
 ---
 
-### Phase 6 — Report back
+### Phase 6 — Report back  `plan:report`
 
 Tell the user:
 

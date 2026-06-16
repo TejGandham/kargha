@@ -10,13 +10,13 @@ This is kargha's frontend analysis at full depth. It is the conditional UI path 
 - The **S/M/L sizing** sets each UI work item's `estimate`.
 - The view/route a slice renders sets its `design_reference`.
 
-The output target is **binder fields**, not ticket sections. (The legacy ticket field shapes — Component-to-Library Map, Icon Mapping, Design Token Map, Token Changes — are documented in `ticket-template.md`; the table formats below match those so the mapping carries cleanly into `component_map` / `icon_map` / `token_changes`, but kargha emits binder JSON, not tickets.) For DTCG token mechanics (tiers, name resolution, `<token-source-dir>`, `<token-build-command>`), see `dtcg-tokens.md`.
+The output target is **binder fields**, not ticket sections. The table formats below — Component-to-Library Map, Icon Mapping, Design Token Map, Token Changes — feed cleanly into each UI work item's `component_map` / `icon_map` / `token_changes`; kargha emits binder JSON, not tickets. For DTCG token mechanics (tiers, name resolution, `<token-source-dir>`, `<token-build-command>`), see `dtcg-tokens.md`.
 
 When this path runs, drive it from three read-only Explore passes (design analysis, codebase + library inventory, data-layer mapping) — run them in parallel where the host allows — then do the mapping and slicing yourself in the main thread.
 
 ---
 
-## 1. Design analysis (Explore pass)
+## 1. Design analysis (Explore pass)  `ui:design`
 
 Read the design export (and its sibling sources). Prefer individual `.jsx` files when present, then `combined.jsx`, then the inline `<script type="text/babel">` block in the HTML. Read the extracted tokens stylesheet if it exists. Report with exact `file:line` citations.
 
@@ -55,7 +55,7 @@ Read the design export (and its sibling sources). Prefer individual `.jsx` files
 
 ---
 
-## 2. Codebase + component-library inventory (Explore pass)
+## 2. Codebase + component-library inventory (Explore pass)  `ui:inventory`
 
 Survey the frontend app and the project's component library/libraries. Report with `file:line` citations.
 
@@ -93,7 +93,7 @@ Also catalog:
 
 ---
 
-## 3. Data-layer mapping (Explore pass)
+## 3. Data-layer mapping (Explore pass)  `ui:datalayer`
 
 Read the project's data layer — a GraphQL schema, OpenAPI/REST spec, or generated TS types — and the design's mock-data shapes. **When there is no single contract artifact** (a REST/FastAPI/tRPC app may ship none), reconstruct the contract by triangulating both sides: the **client** (endpoint table + fetch signatures + request/response usage) and the **server** (route handlers + their types). Treat a loader/action data router (React Router loaders/actions, TanStack Router, Remix) as a **first-class fetch boundary**, not just component-level fetching. **If the project has no data layer at all**, document the data each design entity needs (entity name, fields, inferred types) — do not generate a mock layer here; the main thread decides handling during mapping. Report with `file:line` citations.
 
@@ -112,7 +112,7 @@ Read the project's data layer — a GraphQL schema, OpenAPI/REST spec, or genera
 
 ---
 
-## 4. Component-to-library mapping → `component_map`
+## 4. Component-to-library mapping → `component_map`  `ui:components`
 
 Do this yourself; don't delegate. For every design component, determine if it maps to a library component. Classify each:
 
@@ -161,7 +161,7 @@ Components that are typically **custom** (no library equivalent), regardless of 
 - Charts, timelines, kanban boards.
 - Domain-specific filters and search.
 
-Row format carried into `component_map` (matches `ticket-template.md`'s Component-to-Library Map):
+Row format carried into `component_map`:
 
 | Design Component | Library Mapping | Notes |
 |-|-|-|
@@ -171,7 +171,7 @@ Row format carried into `component_map` (matches `ticket-template.md`'s Componen
 
 ---
 
-## 5. Icon mapping → `icon_map`
+## 5. Icon mapping → `icon_map`  `ui:icons`
 
 Every icon in the design maps to a concrete icon import. Designs reference icons by string name (e.g. `'radar'`, `'bell'`) via an `Icon` component — resolve each to a concrete icon (a React/Vue/Svelte icon component or an SVG sprite reference).
 
@@ -200,7 +200,7 @@ Every icon in the design maps to a concrete icon import. Designs reference icons
 
 ---
 
-## 6. Design-token mapping → `token_changes` (and the shared `token_manifest`)
+## 6. Design-token mapping → `token_changes` (and the shared `token_manifest`)  `ui:tokens`
 
 **The project's token/theme system is the source of truth for all design tokens in the implementation.** The design's extracted tokens — whatever form (CSS custom properties, or a full DTCG system the *design* ships) — are the **spec of intended values**, not the implementation mechanism; never copy them verbatim into the app. Every design token maps back to a project token (theme key, CSS variable, or utility class). Don't conflate the design's token system with the project's: the project side always decides the mechanism, and the two can differ in kind. The DTCG-specific guidance below (tiers, `<token-build-command>`) is keyed to the *project's* token system; it does **not** apply when the project is non-DTCG, even if the design ships DTCG. See `dtcg-tokens.md` for the full asymmetry rules.
 
@@ -228,7 +228,7 @@ Every icon in the design maps to a concrete icon import. Designs reference icons
     | **Close match** | Within ~2px / ~1 shade of a token | Use the closest token — note the minor difference |
     | **No match** | No equivalent in the consumable tier | **Flag to user.** For a tiered system, offer the options below so the decision is build-actionable |
 
-4. **Where it lands in the binder.** The full design→project mapping is the shared `token_manifest` at binder level (present only when a token system exists). Tokens a given UI work item must **add** — those with no consumable-tier match — go in that item's `token_changes`. Carry the rows on every item that consumes the token; do not make one item depend on reading another's. (The `token_changes` row shape matches `ticket-template.md`'s Token Changes table: `Token (path → var) | Op | Value — base / <context> | Source file(s) | Covers | Auth`.)
+4. **Where it lands in the binder.** The full design→project mapping is the shared `token_manifest` at binder level (present only when a token system exists). Tokens a given UI work item must **add** — those with no consumable-tier match — go in that item's `token_changes`. Carry the rows on every item that consumes the token; do not make one item depend on reading another's. The `token_changes` row shape is: `Token (path → var) | Op | Value — base / <context> | Source file(s) | Covers | Auth`.
 
 5. **When tokens don't map:** surface mismatches to the user before drafting items, and **record the decision in the item's `token_changes`** so the build skill can act without re-asking. For a tiered (DTCG) system, frame the options in the build skill's vocabulary:
     - **(a) Use the nearest existing token in the consumable tier** (note the delta).
@@ -242,11 +242,17 @@ Every icon in the design maps to a concrete icon import. Designs reference icons
 
 ---
 
-## 7. Slice → work-item breakdown and S/M/L estimate
+## 7. Slice → work-item breakdown and S/M/L estimate  `ui:slice`
 
 Read all three Explore reports, then break UI work into work items using these vertical-slice heuristics:
 
-1. **Foundation slice** (only if the component library + theme system aren't integrated yet): library/theme provider bootstrap + design-token setup + app shell. Such a setup item has no design view to validate — set its `design_reference` to `none`.
+1. **Foundation slice** (only if the component library + theme system aren't integrated yet): library/theme provider bootstrap + design-token setup + app shell. Such a setup item has no design view to validate — set its `design_reference` to `none`. Its scope is the foundation checklist:
+    - Bootstrap the component-library provider with the project theme/token resolver.
+    - Import the library's base stylesheet (if required).
+    - Set up icon-library imports.
+    - Configure fonts.
+    - Verify project tokens cover the design's color/spacing/radius/shadow needs.
+    - Add supplemental tokens **only** for design values with no project equivalent (document why). For a DTCG system, edit the JSON in `<token-source-dir>` (the right tier file, plus the per-context file for any context override) and run `<token-build-command>`; the generated artifacts are read-only.
 2. **One slice per page/view** when the view has unique components. For a **one-page app** (no routes — views are `useState` modes/panes/modals), slice by **mode/pane/component boundary** (a read-pane slice, an edit-pane slice, a settings-pane slice; bundle a confirm modal per heuristic 6).
 3. **Split list + detail** when both exist for an entity (Projects list vs Project detail).
 4. **Complex reusable components** get their own slice when >100 lines in design and used across views.
@@ -265,7 +271,7 @@ This value sets the work item's `estimate`, feeds the Phase 4 cost-education che
 
 ---
 
-## Reconciliation notes
+## Reconciliation notes  `ui:reconcile`
 
 - **Architectural-reversal check.** While slicing, watch for design elements that **conflict with or reverse a deliberate existing architectural decision** (the codebase survey plus any architecture/decision docs are the signal). Re-adding such a pattern is not a neutral detail — surface it as an explicit scope decision (implement as designed / keep the current architecture and adapt / descope) rather than silently planning the reversal. This is also a natural smart-surfaced-review flag.
 - **Data-layer gaps.** For every design entity with no equivalent in the data layer, decide with the user: **stub** (mock data, mark the item blocked until backend lands), **exclude** (skip views depending on it), **include backend work** (add schema/resolver/endpoint work to the item — makes it larger and may add a serialized migration item), or **plan a canonical mock layer** (when the project has *no* data layer — a separate work item the UI items build against). Group related entities into one question.
