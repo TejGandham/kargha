@@ -15,6 +15,12 @@
 
 These appear as concrete schema fields (Task 1) and reference procedures (Tasks 5–7), so no later task carries a placeholder.
 
+**Reuse of keel's agents (lean lane).** kargha's verification layer is modeled on — and ported registry-free from — keel's **lean (karta) lane** gates (keel is READ-ONLY this session; we copy/adapt prose into kargha-owned files, **no interop**). kargha ships two kargha-owned agents under `agents/`:
+- **`kargha-acceptance-reviewer`** ← keel `karta-spec-reviewer`: per-assertion evidence disposition against the oracle + contract; read-only, fresh session, on the actual diff; **max 2 attempts**, halt-with-CTA on exhaustion (implementer picks fix-and-rerun / declared-debt — no human escalation). Verdict tokens `CONFORMANT | DEVIATION | BLOCKED | SPEC-SUSPECT`, mapped to a `pass | concerns | blocked` envelope.
+- **`kargha-safety-auditor`** ← keel `safety-auditor`: boundary/destructive/sensitive scan on the actual diff; read-only; **max 3 attempts**, escalate to the human on exhaustion. Verdict `PASS | VIOLATION`. The **invariants registry is stripped** — kargha's smart-surfaced-review signals (Task 5) are its inline rule set.
+
+keel's `implementer`, `test-writer`, `landing-verifier`, `pre-check`, and `code-reviewer` inform **skill prose** (build discipline, oracle synthesis, final-gate framing) but are **not** shipped as V1 gate agents — matching keel's lean lane, which itself drops test-writer and code-reviewer.
+
 **Out of scope (per spec §10):** keel binder-schema interop; a separate `submit`/`integrate` skill; invariants registry / fail-closed safety; setup/adopt lane; persisted state *files* (resume is git-native); multi-binder partition (one binder/run in V1); a human review gate *during* delivery. Shipping the plainlanguage skill bundled in this repo is **post-V1** (recorded, not built here).
 
 ---
@@ -42,6 +48,10 @@ New and modified files, by responsibility. Paths are relative to the repo root (
 - Create: `skills/_shared/definition-of-done.md`
 
 > **Note on `skills/_shared/`:** the repo currently *duplicates* shared references into each skill (`dtcg-tokens.md`, `ci-policy.md`, `policy-yagni.md` live in both `kargha-plan/references/` and `kargha-build/references/`). We keep that convention so each skill stays self-contained, but we author each new shared reference **once** under `skills/_shared/` (not shipped as a skill — it has no `SKILL.md`), then each consuming skill task copies the files it needs into its own `references/`. `_shared/` is the single source of truth for edits; the copies are what skills cite. `validate_plugin.py` checks that each skill's cited copy exists; a later hardening task (Task 15) verifies copies match their `_shared/` source.
+
+**Agents (kargha-owned, ported registry-free from keel's lean lane — authored in Task 6):**
+- Create: `agents/kargha-acceptance-reviewer.md` — behavioral acceptance + contract conformance gate (← keel `karta-spec-reviewer`).
+- Create: `agents/kargha-safety-auditor.md` — boundary/destructive/sensitive scan (← keel `safety-auditor`).
 
 **The five skills:**
 - Modify: `skills/kargha-plan/SKILL.md` — frontend-ticket emitter → stack-agnostic binder synthesizer (keel-refine light).
@@ -423,7 +433,7 @@ git commit -m "feat(plan): add binder validator with schema, cycle, and opt-out 
 
 ## Task 3: Plugin integrity test (`validate_plugin.py`) — TDD
 
-This is the repo's plugin-wide test: every `SKILL.md` has valid frontmatter, every relative reference path a `SKILL.md` cites exists, and the example binder validates. It is the "run the test" gate for every later prose task.
+This is the repo's plugin-wide test: every `SKILL.md` has valid frontmatter, every relative reference path a `SKILL.md` cites exists, and every `agents/*.md` (the kargha-owned agents added in Task 6) has valid frontmatter. It is the "run the test" gate for every later prose task. (Binder *content* is validated separately by `validate_binder.py`.)
 
 **Files:**
 - Create: `scripts/validate_plugin.py`
@@ -486,6 +496,12 @@ def check() -> list[str]:
                 continue  # out-of-tree example path, not a repo file
             if not target.exists():
                 errors.append(f"{sd.name}: SKILL.md cites missing path '{rel}'")
+    # kargha-owned agents (ported from keel): frontmatter only (no SKILL-style links)
+    for agent in sorted((ROOT / "agents").glob("*.md")):
+        fm = _frontmatter(agent.read_text())
+        for field in ("name", "description"):
+            if not fm.get(field):
+                errors.append(f"agents/{agent.name}: missing frontmatter '{field}'")
     return errors
 
 
@@ -597,34 +613,54 @@ git commit -m "docs(shared): add smart-surfaced review signals reference"
 
 ---
 
-## Task 6: Shared reference — the verification gate (keel-faithful)
+## Task 6: The verification gate — reference + two kargha-owned agents (ported from keel's lean lane)
+
+This task authors the verification-gate reference AND ports the two kargha-owned gate agents it describes. keel source is **READ-ONLY** — read `keel/.claude/agents/karta-spec-reviewer.md` and `keel/.claude/agents/safety-auditor.md`, then write *adapted, kargha-owned* copies. Do not edit, move, or run anything under `keel/`. No keel interop — the agents are standalone kargha files.
 
 **Files:**
 - Create: `skills/_shared/verification-gate.md`
+- Create: `agents/kargha-acceptance-reviewer.md` (← keel `karta-spec-reviewer`)
+- Create: `agents/kargha-safety-auditor.md` (← keel `safety-auditor`)
 
 - [ ] **Step 1: Author the reference**
 
 Write `skills/_shared/verification-gate.md` — the registry-free version of keel's automated-gate pattern, shared by `kargha-verify`, `kargha-validate`, `kargha-build`, and orchestrated by `kargha-deliver`. Required content:
 
-- **Shape:** a read-only gate runs on the **actual diff** in a **fresh AI session** (only the worktree, the binder, and the acceptance check — no build-session context); it is independent of the implementer.
+- **Shape:** a read-only gate runs on the **actual diff** in a **fresh AI session** (only the worktree, the binder, and the acceptance check — no build-session context); it is independent of the implementer. **It is realized by dispatching the two kargha-owned agents below** (`kargha-acceptance-reviewer`, `kargha-safety-auditor`) plus `kargha-validate` for visual oracles.
 - **Three checks (run on the actual diff):**
-  1. **Acceptance** — the oracle's assertions (visual fidelity for `kargha-validate`; `unit/integration/e2e/smoke` for `kargha-verify`).
-  2. **Contract conformance** — against an **external artifact** (type-checker, schema, contract test), *not* the binder's own declaration.
-  3. **Boundary scan** — does the diff cross a sensitive/destructive/contract boundary the item didn't justify? (Re-run the `smart-surfaced-review.md` signals on real code.)
-- **The loop:** on any finding, **kick back to build for bounded self-correction** and re-run. **Only on retry-exhaustion halt-with-CTA to the human.** State the caps explicitly, mirroring keel: **safety/boundary gate max 3 attempts; contract/spec gate max 2 attempts.** The human is reached only on escalation — there is **no human review gate during delivery**.
+  1. **Acceptance** — the oracle's assertions (visual fidelity for `kargha-validate`; `unit/integration/e2e/smoke` via `kargha-acceptance-reviewer`).
+  2. **Contract conformance** — against an **external artifact** (type-checker, schema, contract test), *not* the binder's own declaration (also `kargha-acceptance-reviewer`).
+  3. **Boundary scan** — does the diff cross a sensitive/destructive/contract boundary the item didn't justify? (`kargha-safety-auditor`, re-running the `smart-surfaced-review.md` signals on real code.)
+- **The loop:** on any finding, **kick back to build for bounded self-correction** and re-run. **Only on retry-exhaustion halt-with-CTA.** State the caps explicitly, mirroring keel's lean lane: **`kargha-safety-auditor` max 3 attempts → escalate to the human; `kargha-acceptance-reviewer` max 2 attempts → halt-with-CTA (implementer picks fix-and-rerun / declared-debt, no human escalation).** There is **no human review gate during delivery**.
 - **The floor:** if the change does not even compile/type-check/lint, the gate does not pass and kargha does not auto-merge — it surfaces (cite `definition-of-done.md`).
 - **Advisory-hook note:** any pre-tool hook stays advisory (exit 0) — the gate, not the hook, blocks; the gate self-corrects then escalates. (Mirrors keel's safety hook.)
 
-- [ ] **Step 2: Run the integrity test**
+- [ ] **Step 2: Port `agents/kargha-acceptance-reviewer.md`**
+
+Read `keel/.claude/agents/karta-spec-reviewer.md` (read-only). Write `agents/kargha-acceptance-reviewer.md` as an adapted kargha-owned copy. Keep:
+- frontmatter shape `name`/`description`/`tools`/`model` (set `name: kargha-acceptance-reviewer`, `tools: Read, Glob, Grep, Bash` — read-only; `model: opus`);
+- the **read-only / inspection-only** discipline and "do not edit code" rule;
+- the **per-assertion evidence disposition** mechanism — for each `oracle.assertions[i]`: evidence kind (inspection-verifiable / execution-required) and disposition (`CONFORMS | DEVIATION | covered-by-test | declared-debt | UNDISPOSED`);
+- **contract conformance** against an external artifact (type-checker/schema/contract test), not the binder's own claim;
+- the verdict tokens `CONFORMANT | DEVIATION | BLOCKED | SPEC-SUSPECT` and the `pass | concerns | blocked` envelope;
+- the **max-2-attempts → halt-with-CTA** contract (no human escalation; implementer picks fix-and-rerun or a declared-debt marker).
+
+Adapt/strip: replace all keel **invariants-registry / resolved-feature-pointer / stored-state** references with kargha's **binder + work-item `oracle`/`contract`** (read from the binder JSON on disk); drop keel's test-writer/code-reviewer lane assumptions; "declared debt" uses kargha's marker family from `skills/_shared/declared-debt.md` (Task 7). Input it receives: worktree path, binder path + item id, diff range (item branch vs integration tip).
+
+- [ ] **Step 3: Port `agents/kargha-safety-auditor.md`**
+
+Read `keel/.claude/agents/safety-auditor.md` (read-only). Write `agents/kargha-safety-auditor.md` as an adapted kargha-owned copy. Keep: frontmatter (`name: kargha-safety-auditor`, `tools: Read, Glob, Grep, Bash`, `model: opus`); the read-only scan-and-report frame; the verdict `PASS | VIOLATION` + `pass | concerns | blocked` envelope; the **max-3-attempts → escalate-to-human** contract. **Strip the invariants registry / fail-closed-on-unconfigured rule entirely** — the rule set is the **smart-surfaced-review signals** (`skills/_shared/smart-surfaced-review.md`, Task 5): destructive ops, sensitive zones, contract mutations, capability/resource escalation, blast radius — scanned on the **actual diff**, flagging crossings the work item didn't justify. Input: worktree path, binder path + item id, diff range.
+
+- [ ] **Step 4: Run the integrity test**
 
 Run: `uv run scripts/validate_plugin.py --self-test`
-Expected: `PASS`.
+Expected: `PASS` (the new `agents/*.md` frontmatter is now linted; both must have `name` + `description`).
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add skills/_shared/verification-gate.md
-git commit -m "docs(shared): add keel-faithful verification-gate reference"
+git add skills/_shared/verification-gate.md agents/kargha-acceptance-reviewer.md agents/kargha-safety-auditor.md
+git commit -m "feat(verify): add verification-gate reference + kargha acceptance/safety agents (ported from keel lean lane)"
 ```
 
 ---
@@ -795,7 +831,7 @@ Replace `:49-540` with these phases (keep the existing "Phase N — …" heading
 |-|-|
 | **Phase 0 — Ingest intent (light gate)** | Accept keel-refine inputs: a problem/feature description, and/or a design mock or non-functional prototype path. The only hard requirement is *some* statement of intent. Light repo detect (never-blocking). If the input is a Claude Design / runtime-JSX export, additionally run the UI-format gate (keep the existing format-gate logic as a **conditional** branch, citing the design-input contract aside). Resolve where the binder lands: detect → ask → default `.kargha/binders/<slug>.json`. |
 | **Phase 1 — Best-effort repo + stack understanding** | Reuse the Explore-subagent pattern, but stack-agnostically: understand the stack, conventions, toolchain, CI-facing checks, and env command. Interview the user only where context is genuinely thin. Never require architecture/decision docs; read them if present. (UI annex: when a component library/token system exists, run the existing library/token inventory passes — cite `references/dtcg-tokens.md`.) |
-| **Phase 2 — Synthesize the binder (synthesis subagent, main thread owns)** | Decompose the intent into work items. For each item set `id`, `title`, `estimate`, `depends_on`, `contract`, and the **oracle** (per `references/definition-of-done.md`: a real CI-facing check + assertions, or an explicit recorded `opt_out`+reason). Set `serialize`/`shared_resources` for order-sensitive/collision-prone items. Populate UI-only fields (`design_reference`, `component_map`, `icon_map`, `token_changes`) **only** when the stack has that surface. Fill binder-level `slug`, `motivation`, `scope`, `design_facts`, `env_contract`, and `token_manifest` (only if a token system exists). Do not delegate the synthesis judgment. |
+| **Phase 2 — Synthesize the binder (synthesis subagent, main thread owns)** | Decompose the intent into work items. For each item set `id`, `title`, `estimate`, `depends_on`, `contract`, and the **oracle** (per `references/definition-of-done.md`: a real CI-facing check + assertions, or an explicit recorded `opt_out`+reason). Set `serialize`/`shared_resources` for order-sensitive/collision-prone items. Populate UI-only fields (`design_reference`, `component_map`, `icon_map`, `token_changes`) **only** when the stack has that surface. Fill binder-level `slug`, `motivation`, `scope`, `design_facts`, `env_contract`, and `token_manifest` (only if a token system exists). Do not delegate the synthesis judgment. **keel test-writer discipline (inspiration):** keep each oracle assertion traceable to the item's `contract` — if an assertion references a field/shape the item doesn't declare, flag the contract gap now rather than emitting an unverifiable assertion. |
 | **Phase 3 — Smart-surfaced review (the one human-in-the-loop point)** | Per `references/smart-surfaced-review.md`: compute the seven boundary signals per item, write `surface {flagged, signals}`, and offer the user **review all / some / flagged**. Front-load decisions here so delivery is hands-off. Do not surface oracles for routine items. Log uncomputed signals. |
 | **Phase 4 — Cost education** | When scope is large, tell the user plainly that this scope will cost time and money before they see anything tangible, and suggest a smaller first slice. Educate; do not forbid. |
 | **Phase 5 — Emit + validate + commit** | Write the binder JSON to the resolved location. **Validate it:** run `uv run skills/kargha-plan/scripts/validate_binder.py --binder <path>` and do not proceed on failure (fix and re-validate). Then commit on the `commit` verb (the binder is committed only at run boundaries; it is read-only to build steps thereafter). A **single-work-item binder** is noted as eligible to skip deliver (the "just this once" hatch — go straight to build). |
@@ -852,7 +888,7 @@ The input is now `(binder path, work-item id)` — extract the item from the val
 
 - [ ] **Step 4: Rewrite worktree + implement (Phase 4)**
 
-Keep the worktree creation + mutation-guard discipline, but branch **off the current integration tip** (`kargha/<slug>/integration`), not the default branch, and name the branch to embed the item id. Implement the item against resolved conventions, stack-agnostically. Keep the UI-specific implementation rules (component map, icon imports, token rules) as a **conditional annex** that applies only when those binder fields are present. Add: **declare deferrals inline** per `references/declared-debt.md`.
+Keep the worktree creation + mutation-guard discipline, but branch **off the current integration tip** (`kargha/<slug>/integration`), not the default branch, and name the branch to embed the item id. Implement the item against resolved conventions, stack-agnostically. Keep the UI-specific implementation rules (component map, icon imports, token rules) as a **conditional annex** that applies only when those binder fields are present. Add: **declare deferrals inline** per `references/declared-debt.md`. **keel-implementer discipline (inspiration):** never weaken or edit the item's `oracle`/acceptance to make it pass; on a genuine oracle-or-contract conflict, halt-with-CTA rather than silently diverging (principle 6: code/specs/tests win).
 
 - [ ] **Step 5: Rewrite the gates → acceptance loop (Phase 5–7)**
 
@@ -904,17 +940,18 @@ cp skills/kargha-plan/references/binder-reference.md skills/kargha-verify/refere
 
 - [ ] **Step 2: Author the SKILL.md**
 
-Write `skills/kargha-verify/SKILL.md`. Frontmatter `name: kargha-verify`; `description`: verify one built work item against its behavioral acceptance check (oracle types `unit/integration/e2e/smoke`) in a **read-only, fresh session** on the **actual diff**; check acceptance + external-contract conformance + boundary crossings; **kick findings back to build** and escalate to the human only on retry-exhaustion. Trigger phrases: "verify this work item", "run the behavioral gate", "check acceptance for `<id>`". Body (mirror `kargha-validate`'s read-only-reporter structure, per `references/verification-gate.md`):
+Write `skills/kargha-verify/SKILL.md`. Frontmatter `name: kargha-verify`; `description`: verify one built work item against its behavioral acceptance check (oracle types `unit/integration/e2e/smoke`) in a **read-only, fresh session** on the **actual diff**; check acceptance + external-contract conformance + boundary crossings; **kick findings back to build** and escalate to the human only on retry-exhaustion. Trigger phrases: "verify this work item", "run the behavioral gate", "check acceptance for `<id>`".
+
+`kargha-verify` is the **thin orchestrator** for the behavioral gate: it **dispatches the two kargha-owned agents** (`agents/kargha-acceptance-reviewer`, `agents/kargha-safety-auditor` — authored in Task 6, dispatched by name, plugin-global, NOT copied into this skill's references) in fresh sessions, then aggregates their verdicts and drives the kickback/escalation loop (per `references/verification-gate.md`). It is read-only and never edits. Body:
 
 | Phase | Content |
 |-|-|
 | Inputs | the worktree path, the binder + item id (for the oracle), and the diff range (item branch vs the integration tip). |
 | Phase 0 — Prerequisites | fresh session with only the worktree/binder/oracle; resolve the repo-provided **pre-verify env command** bound to the wave; hard-gate on a missing env if the oracle needs one. |
-| Phase 1 — Acceptance | run the oracle's `command` + assertions for the item's `type`; capture pass/fail with output. |
-| Phase 2 — Contract conformance | check against an **external artifact** (type-checker/schema/contract test), not the binder's own claim. |
-| Phase 3 — Boundary scan | re-run the `references/smart-surfaced-review.md` signals on the actual diff; flag unjustified crossings. |
-| Phase 4 — Verdict + kickback | structured report (PASS / FINDINGS); on findings, return them for **build to self-correct** (bounded, per caps); the human is reached **only on escalation**. Read-only: never edits. |
-| Gotchas | floor = compile/type-check/lint (cite `references/definition-of-done.md`); read-only; fresh session (no build-session context); escalate only on exhaustion; no human gate during delivery. |
+| Phase 1 — Acceptance + contract (dispatch `kargha-acceptance-reviewer`) | pass it the worktree/binder/item-id/diff-range; it does per-assertion disposition of the oracle and external-contract conformance, returns `CONFORMANT \| DEVIATION \| BLOCKED \| SPEC-SUSPECT`. Loop: on DEVIATION, kick back to build (max 2), then halt-with-CTA. |
+| Phase 2 — Boundary scan (dispatch `kargha-safety-auditor`) | it re-runs the `smart-surfaced-review` signals on the actual diff, returns `PASS \| VIOLATION`. Loop: on VIOLATION, kick back to build (max 3), then escalate to the human. |
+| Phase 3 — Aggregate verdict | combine both agents' verdicts into a `pass \| concerns \| blocked` envelope; on pass, report PASS to the caller (build/deliver); on exhaustion, halt-with-CTA / escalate per the caps above. |
+| Gotchas | floor = compile/type-check/lint (cite `references/definition-of-done.md`); read-only; fresh session (no build-session context); the agents — not this skill — do the reading; escalate only on exhaustion; no human gate during delivery. |
 
 - [ ] **Step 3: Run the integrity test**
 
@@ -1025,16 +1062,16 @@ git commit -m "feat(deliver): add parallel-wave scheduler over the integration b
 
 ## Task 14: Packaging — plugin manifests, marketplace, README
 
-Update packaging so the plugin describes five skills and the orchestration framing.
+Update packaging so the plugin describes five skills **and the two kargha-owned agents**, with the orchestration framing.
 
 **Files:**
 - Modify: `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`
 - Modify: `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`
 - Modify: `README.md`
 
-- [ ] **Step 1: Read the manifests to learn their shape**
+- [ ] **Step 1: Read the manifests + confirm agent discovery**
 
-Read `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`, and `.agents/plugins/marketplace.json` to see whether skills are enumerated (the Claude `plugin.json` does not enumerate skills — they're auto-discovered — but the marketplace/codex manifests may).
+Read `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`, and `.agents/plugins/marketplace.json` to see whether skills/agents are enumerated (the Claude `plugin.json` does not enumerate skills — they're auto-discovered — but the marketplace/codex manifests may). **Confirm the top-level `agents/` directory (Task 6's `kargha-acceptance-reviewer.md` / `kargha-safety-auditor.md`) is discovered by the plugin** the same way top-level `skills/` is: if the manifest format requires an explicit `agents` path/array (some do), add it; if agents are auto-discovered from `agents/`, no manifest change is needed beyond confirming it. If unsure of the convention, check current Claude Code plugin docs (e.g. via the claude-code-guide agent) — do not guess silently.
 
 - [ ] **Step 2: Update `.claude-plugin/plugin.json`**
 
@@ -1046,7 +1083,7 @@ Replace the `description` with the orchestration framing (synthesize a binder; d
 
 - [ ] **Step 5: Rewrite `README.md`**
 
-Rewrite for the orchestration framework. Keep the loom epigraph. Required sections: the pipeline (`plan → deliver → build`, with `verify`/`validate` as gates; mermaid or ascii); **the binder** (link `skills/kargha-plan/references/binder-reference.md`); the five skills (one para each); the new connecting contract is the **binder** (not the ticket template); cross-cutting concepts (stack-agnostic; ad-hoc, repo-directed, no setup/invariants; parallel-by-default with the gates; git-native resume; no PR — ends at the integration branch); Requirements; Install (namespaced `kargha:kargha-plan` … `kargha:kargha-verify`). Remove the frontend-only "three skills"/"ticket contract" framing.
+Rewrite for the orchestration framework. Keep the loom epigraph. Required sections: the pipeline (`plan → deliver → build`, with `verify`/`validate` as gates; mermaid or ascii); **the binder** (link `skills/kargha-plan/references/binder-reference.md`); the five skills (one para each); **the two kargha-owned agents** (`kargha-acceptance-reviewer`, `kargha-safety-auditor`) — one line each, noting they are the verification gates, ported registry-free from keel's lean-lane agents and dispatched by `kargha-verify`/`kargha-build`; the new connecting contract is the **binder** (not the ticket template); cross-cutting concepts (stack-agnostic; ad-hoc, repo-directed, no setup/invariants; parallel-by-default with the gates; git-native resume; no PR — ends at the integration branch); Requirements; Install (namespaced `kargha:kargha-plan` … `kargha:kargha-verify`). Remove the frontend-only "three skills"/"ticket contract" framing.
 
 - [ ] **Step 6: Run the integrity test + JSON validity**
 
@@ -1150,6 +1187,7 @@ git commit -m "docs: add parallelism+review how-to and shared-copy drift check"
 
 ## Self-Review (run after implementing all tasks)
 
-- **Spec coverage:** map each spec section to a task — §2 principles (Tasks 4–7 references + skill bodies), §3 pipeline (README/plan/deliver), §4 binder (Tasks 1–4), §5 kargha-plan (Tasks 8–9), §6 smart-surfaced review (Task 5 + plan Phase 3 + verify Phase 3), §7 deliver (Task 13), §8 lifecycle (Task 13 Phase 4 + build halt/cleanup), §9 build+verify (Tasks 10–12), §10 out-of-scope (header), §11 migration (Tasks 8–13), §12 deferred mechanisms (plan-level decisions → schema + `integration-branch.md`).
+- **Spec coverage:** map each spec section to a task — §2 principles (Tasks 4–7 references + skill bodies), §3 pipeline (README/plan/deliver), §4 binder (Tasks 1–4), §5 kargha-plan (Tasks 8–9), §6 smart-surfaced review (Task 5 + plan Phase 3 + the `kargha-safety-auditor` agent's boundary scan), §7 deliver (Task 13), §8 lifecycle (Task 13 Phase 4 + build halt/cleanup), §9 build+verify — the keel-lean-lane gate (Tasks 10–12 + the two ported agents in Task 6), §10 out-of-scope (header), §11 migration (Tasks 8–13), §12 deferred mechanisms (plan-level decisions → schema + `integration-branch.md`).
+- **keel-agent reuse:** the two kargha-owned agents (`kargha-acceptance-reviewer` ← `karta-spec-reviewer`, `kargha-safety-auditor` ← `safety-auditor`) are ported in Task 6, dispatched by `kargha-verify` (Task 11), linted by `validate_plugin.py` (Task 3), and packaged in Task 14; inspiration-only borrowings (implementer, test-writer) are noted in Tasks 9–10.
 - **Placeholder scan:** no "TBD"/"handle edge cases"; prose tasks carry section blueprints + verbatim contract content (schema, gates table, blessed copy).
 - **Type consistency:** the field names used across tasks match `binder-schema.json` exactly (`slug`, `work_items`, `oracle.opt_out`/`reason`, `env_contract.supports_isolation`, `surface.flagged/signals`); the tag/ref scheme strings (`kargha/<slug>/wave-<N>-base`, `refs/kargha/<slug>/item-<id>/done`, `[kargha:item-<id>]`) are identical in `integration-branch.md`, build, and deliver.
