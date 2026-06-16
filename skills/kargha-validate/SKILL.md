@@ -3,7 +3,9 @@ name: kargha-validate
 description: Compare a running frontend implementation against design HTML files exported from Claude Design OR a runtime-JSX design source. Opens both the live app (at the caller-provided app URL) and the served design prototype through bundled uv-run capture scripts, captures screenshots and DOM snapshots, then reports structured discrepancies across layout, color, typography, spacing, component structure, and visual hierarchy. Validates one view per invocation — the calling pipeline loops for multiple views. Invoke when validating implementation fidelity — trigger phrases include "validate against the design", "compare implementation to design", "check design fidelity", "does this match the design", "visual QA against design HTML", or any request to diff what's running vs the design prototype files.
 ---
 
-Compare a single frontend view against its design prototype exported from Claude Design OR a runtime-JSX design source. This skill is a **validation step** in a larger pipeline: it reports discrepancies but never fixes them. The caller decides what to act on.
+Compare a single frontend view against its design prototype exported from Claude Design OR a runtime-JSX design source. This skill is kargha's **visual acceptance gate** — the gate invoked for oracle `type: visual` items. It is read-only: it reports discrepancies as kickback input for `kargha-build` to self-correct and never fixes anything itself. The caller decides what to act on.
+
+See [references/verification-gate.md](references/verification-gate.md) for how the gate fits the broader build/verify loop, and [references/definition-of-done.md](references/definition-of-done.md) for the acceptance floor.
 
 The skill uses bundled PEP 723 Python scripts to avoid Bash/WSL/POSIX assumptions:
 
@@ -26,6 +28,7 @@ The caller's prompt must include:
 - **Auth / login setup** (optional) — steps, storage state, cookie, token, or test-login mechanism needed for the target app route to render.
 - **Viewport** (optional) — width x height in pixels. Defaults to `1440x900`.
 - **Focus areas** (optional) — comparison dimensions to emphasize.
+- **Oracle assertions** (optional) — the acceptance assertions for this view as stated in the work item's oracle (e.g., "zero critical or major discrepancies at 1440x900"). When provided, the report adds an `ACCEPTANCE` verdict against these assertions. When omitted, the report describes drift only (fully back-compatible).
 
 For alternate theme contexts, the caller provides navigation/context-switch steps for both design and app. This skill has no separate theme input.
 
@@ -172,7 +175,11 @@ Bulleted list, or "None".
 
 EXTRA_ELEMENTS:
 Bulleted list, or "None".
+
+ACCEPTANCE: <pass | fail>   ← include ONLY when oracle assertions were provided; omit entirely otherwise
 ```
+
+`ACCEPTANCE: pass` means every provided oracle assertion holds (e.g., zero critical and zero major discrepancies). `ACCEPTANCE: fail` means at least one assertion does not hold. When no assertions are provided, omit the line entirely — the schema is unchanged for callers that do not pass assertions.
 
 Do not add `RECOMMENDATIONS`, `FIXES`, code suggestions, or implementation instructions to the schema. If a worker suggests fixes, strip them before returning the report.
 
@@ -191,3 +198,6 @@ The final output is the structured report from Phase 3. Do not modify app files,
 - **Auth redirects are not visual mismatches.** `DEGRADED_AUTH` blocks comparison and routes the problem back to the caller for session setup.
 - **Validation is read-only.** This skill reports only. It never fixes, re-runs after fixes, or changes files.
 - **Playwright is external.** Do not repair or bypass `playwright-cli` internals. Fail clearly when a Playwright action fails.
+- **This is the visual acceptance gate.** kargha routes `oracle.type: visual` items here. Other oracle types (unit, integration, e2e, smoke) go to `kargha-acceptance-reviewer`, not here.
+- **The report is kickback input, not a fix.** A `STATUS: mismatch` or `ACCEPTANCE: fail` result feeds back to `kargha-build` for self-correction within the gate's retry cap. This skill never applies those corrections.
+- **The oracle sets the bar.** When oracle assertions are provided, `ACCEPTANCE` is determined by them — not by the skill's own judgment of severity. A single critical discrepancy can produce `ACCEPTANCE: fail` even if the visual diff looks minor. When no assertions are given, no verdict is emitted; the report is descriptive only.
