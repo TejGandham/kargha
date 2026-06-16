@@ -458,7 +458,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILLS = ROOT / "skills"
-LINK_RE = re.compile(r"\(([^)]+\.(?:md|json|py))\)")          # markdown links
+LINK_RE = re.compile(r"\(([^\s)]+\.(?:md|json|py))\)")        # markdown links (no spaces)
 PATH_RE = re.compile(r"`(references/[^`]+|scripts/[^`]+)`")    # backticked paths
 
 
