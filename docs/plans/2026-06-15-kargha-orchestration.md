@@ -23,6 +23,12 @@ keel's `implementer`, `test-writer`, `landing-verifier`, `pre-check`, and `code-
 
 **Out of scope (per spec §10):** keel binder-schema interop; a separate `submit`/`integrate` skill; invariants registry / fail-closed safety; setup/adopt lane; persisted state *files* (resume is git-native); multi-binder partition (one binder/run in V1); a human review gate *during* delivery. Shipping the plainlanguage skill bundled in this repo is **post-V1** (recorded, not built here).
 
+**Additive, not replacement (governing constraint).** kargha began as a strong frontend pipeline; the stack-agnostic augmentation goes ON TOP of that depth and must not thin it. The frontend-specific skills are **preserved in full** as the conditional UI/data path:
+- **kargha-plan** keeps the component-to-library / icon / design-token / data-layer **mapping methodology** and vertical-slice + S/M/L heuristics — now populating the binder's `component_map`/`icon_map`/`token_changes`/`design_reference` fields instead of ticket sections.
+- **kargha-build** keeps the **data-layer conformance loop**, the **dev-server lifecycle** (port check → managed start → health-poll the real route → auth-aware gate → cleanup), the **DTCG token-conformance check** + autonomous semantic-token add, the component/icon/token implementation rules, and the **design-validation loop**.
+
+Stack-agnostic items (backend/CLI/data/IaC) skip the UI path; UI items get the full treatment. Only the orchestration *plumbing* is genuinely replaced (ticket source → binder work item; PR → integration-branch merge). Tasks 9 and 10 are written to this constraint.
+
 ---
 
 ## File Structure
@@ -809,7 +815,7 @@ git commit -m "feat(plan): stack-agnostic intro + project config (keel-refine li
 
 ## Task 9: kargha-plan — workflow phases (synthesis → review → emit → validate → commit)
 
-Rewrite the workflow body so the output is a **validated, committed binder**, not frontend tickets. Copy the shared references this skill needs.
+Rewrite the workflow body so the output is a **validated, committed binder**, not frontend tickets. Copy the shared references this skill needs. **Additive (governing constraint):** preserve kargha's frontend *analysis* methodology — extract it into `skills/kargha-plan/references/ui-analysis.md` (component-to-library classification, icon-mapping priority, design-token tier mapping, data-layer buckets, vertical-slice + S/M/L heuristics, and the design/library/token Explore briefs) and have the UI path use it to populate the binder's `component_map`/`icon_map`/`token_changes`/`design_reference` fields and the slice→work-item breakdown. The lean binder-synthesis spine stays; the UI depth is preserved, not thinned.
 
 **Files:**
 - Modify: `skills/kargha-plan/SKILL.md:49-554` (Workflow through Gotchas)
