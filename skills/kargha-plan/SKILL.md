@@ -1,50 +1,58 @@
 ---
 name: kargha-plan
-description: Analyze a Claude Design OR runtime-JSX design HTML export and decompose it into vertical-slice tickets for frontend implementation. Reads the design's components, tokens, navigation, and mock data; maps design components to the project's component library, tokens to its theme/token system, icons to its icon libraries, and cross-references its data layer (GraphQL schema, REST types, or stubbed). Emits self-contained tickets into any ticketing system (JIRA, Linear, GitHub Issues, …) OR as plain Markdown/JSON files. Each ticket includes a component-to-library mapping so implementers know which library components to use. Invoke when the user has a design prototype and wants implementation tickets — trigger phrases include "plan the frontend for this design", "break this design into tickets", "create frontend tickets from this design", or "slice this design into implementation work".
+description: Analyze a problem/feature description and/or a design mock or non-functional prototype and synthesize a validated binder of work items for ad-hoc orchestration; stack-agnostic (frontend, backend, CLI, data, library/SDK, IaC, mobile, ML, docs — UI is one stack among many); emits .kargha/binders/<slug>.json. Trigger phrases: "plan this with kargha", "synthesize a binder", "break this work into a binder", "kargha-plan this feature".
 ---
 
-
-
-Turn a Claude Design OR runtime-JSX design export into vertical-slice tickets for frontend implementation. Each ticket is self-contained and independently implementable by an implementation agent/skill or a human.
-
-The skill's core value is the **component-to-library mapping** — determining which design components map to the project's component library (and with which props/variants), which need thin wrappers, and which must be built custom. This mapping appears in every ticket.
+kargha-plan is **keel-refine light**: it ingests intent and — without fail — synthesizes a binder. Give it a problem or feature description; optionally attach a design mock or non-functional prototype. It asks a minimal set of questions, runs a synthesis subagent to draft the binder, and commits on an explicit "commit" verb. The output lands at `.kargha/binders/<slug>.json` and is validated by `validate_binder.py` before any build run.
 
 ## How this skill adapts to your project
 
-This skill is stack-agnostic about the **project** side. It does **not** assume a specific component library, icon set, theme system, ticketing system, or repo layout. Instead, it resolves a small set of project settings up front (detect → ask), then maps the design against whatever it finds:
+kargha-plan is **stack-agnostic**. It plans frontend, backend, CLI, data pipelines, libraries/SDKs, IaC, mobile, ML, and docs work in the same way — UI is one stack among many, not the default.
 
-- **Component library:** any library, several libraries, or none. With no library, every component is "custom" — the mapping still tells you exactly what to build.
-- **Icon libraries:** a primary source, optional fallbacks, or none.
-- **Token/theme system:** a theme object, CSS custom properties, a design-tokens file (incl. W3C DTCG JSON — see references/dtcg-tokens.md), a utility-class framework, or plain CSS.
-- **Data layer:** GraphQL schema, REST/OpenAPI types, generated TS types, or none (stub until available).
-- **Ticket destination:** any ticketing system, or plain Markdown/JSON files written to a directory.
+**What it drops from keel-refine:**
 
-Where this document shows a concrete tool or library, treat it as an **example**, not a requirement.
+- Bootstrap-gate preflight → a light, never-blocking repo detect (see Project configuration below).
+- Multi-binder partition → when the scope spans multiple natural binders, the skill suggests a breakdown into one binder's work items and plans one binder per run (V1).
+- Roundtable decomposition → synthesis runs as a single subagent, not a panel.
 
-**Design-input contract (the one thing this skill *does* assume).** The analysis path assumes the design is a **Claude Design OR runtime-JSX HTML export** whose components are JSX (individual `.jsx` files, a `combined.jsx`, or an inline `<script type="text/babel">` block), with `useState`-driven view switching and inline styles. This is a precondition, not stack-agnosticism: a Vue/Svelte prototype, a Figma/Anima HTML export, or a plain static-HTML export will pass the "is it HTML" check and then silently mis-parse (empty component inventory, no detected views). Phase 0a gates on this format and bails with the supported-format list if it doesn't hold. Where the document states design facts ("the design uses `useState` navigation / inline styles / hardcoded mock data"), read them as properties of this supported export format.
+**What it keeps:**
 
-## Project configuration (resolve once, up front)
+- Intent ingestion widened to design exports: when the input is a Claude Design or runtime-JSX export, the UI-analysis path applies (component inventory, token map, icon map). This is a **stack-specific aside**, not a precondition for the whole skill.
+- The synthesis subagent that drafts the binder from ingested intent.
+- A minimal interview loop — asks only what it cannot detect.
+- Commit-on-verb: the binder is presented as an editable card and committed when you say "commit."
 
-Resolve each setting in this order: **explicit user input → detect from the repo → ask the user** (batch all unknowns into a single `AskUserQuestion` OR the host's equivalent user-input prompt). Do not prompt for things you can detect. **When detection conflicts with explicit user input or the project's documented/blessed stack, the stated stack wins — confirm it rather than asserting what's merely present** (a repo can be mid-migration, so a detected framework/library shows the *current* state, not the intended target).
+**What it replaces:**
+
+- The mandatory per-card walk → smart-surfaced review: the synthesis subagent flags items that warrant human attention (`surface.flagged` + `surface.signals`); unflagged items don't require a walk.
+
+## Project configuration (resolve once, never blocking)
+
+Resolve in order: **explicit user input → detect from the repo → ask the user** (batch all unknowns into one question). Skip what you can detect. When detection conflicts with the project's stated stack, the stated stack wins — a repo can be mid-migration.
 
 | Setting | What it is | How to resolve |
-| ------- | ---------- | -------------- |
-| **Frontend app dir** | Where components/routes/styles live | Detect the package that depends on the UI framework (e.g., a `package.json` with `react`/`next`/`vue`/`svelte`); in a monorepo with multiple frontend apps, **ask** which app the design targets (an export carries no app identifier, so it is not detectable). One planning run targets exactly one `<frontend-app>` |
-| **Component library** | UI-primitive library/libraries the project uses (0..n) | Detect from `package.json` deps + existing import statements; may legitimately be none |
-| **Icon libraries** | Primary icon source + optional fallbacks | Detect from deps/imports; may be none |
-| **Token/theme system** | The source of truth for colors / spacing / radius / typography / shadows | Detect: a theme object, CSS custom properties in a global stylesheet, a design-tokens file (incl. W3C DTCG JSON — resolve the extra settings in references/dtcg-tokens.md), a utility-class config, or plain CSS |
-| **Data layer** | The API the UI reads from | Detect: a GraphQL schema file, OpenAPI/REST types, generated TS client types; may be none |
-| **Project rules** | Component / data conventions the repo documents | Detect: contributor docs, lint configs, or rules files; **verify the doc has real content before citing — a detected rules/design doc may be an unfilled template (placeholder headings, TODOs); cite only filled docs** |
-| **Toolchain commands** | lint / test / build invocations | Detect from package scripts and the repo's task runner (npm/pnpm/yarn scripts, Nx, Turborepo, Make, etc.) |
-| **Repo policy** | CI/ruleset/branch/deployment policy, only when explicitly in the frontend planning scope | Read root/area `AGENTS.md`, workflows, CI docs, current rulesets/merge settings/bypass actors when remote policy is requested; load [references/ci-policy.md](references/ci-policy.md) and [references/policy-yagni.md](references/policy-yagni.md) |
-| **Ticket destination** | Where tickets are emitted | Ask: a ticketing system (which one + how to call it) **or** plain files (output dir + `md`/`json`) — see Phase 0b |
-| **Design-validation** | Optional fidelity-check tool/skill | Use if the environment provides one (e.g., a skill that screenshots the running app and diffs it against the design); otherwise the design-validation loop becomes a manual checklist |
+|-|-|-|
+| **Stack** | The primary tech domain (frontend, backend, CLI, data, IaC, mobile, ML, docs, mixed) | Detect from repo layout, package manifests, and language files; ask when ambiguous |
+| **Toolchain commands** | lint / test / build / typecheck invocations | Detect from package scripts, task runners (npm/pnpm/yarn, Makefile, Nx, Turborepo, Cargo, Poetry, etc.) |
+| **CI-facing checks** | The subset of commands that gate CI (used as oracle `command` values) | Detect from CI workflow files; if absent, use the toolchain commands |
+| **Env command** | The command that starts the dev/test environment (feeds `env_contract.command`) | Detect from package scripts or a `docker-compose.yml`; ask if not found |
+| **Repo direction docs** | Architecture docs, ADRs, or decision records | Detect: `ARCHITECTURE.md`, `docs/architecture/`, `docs/decisions/`, `adr/`; cite only filled docs (skip placeholder templates); ask when context is thin |
+| **Project rules** | Conventions the repo documents (lint configs, contributor guides, rules files) | Detect; verify the doc has real content before citing |
+| **Repo policy** | CI/branch/deployment policy (only when in planning scope) | Read root/area `AGENTS.md`, workflows, and CI docs; load [references/ci-policy.md](references/ci-policy.md) and [references/policy-yagni.md](references/policy-yagni.md) |
 
-Record the resolved values — every later phase references them. In this document, placeholders like `<frontend-app>`, `<component-lib>`, `<icon-lib>`, `<fallback-icon-lib>`, `<schema>`, `<lint command>`, `<test command>`, `<build command>` refer to these resolved settings.
+Resolved values feed the binder's `design_facts.stack`, `env_contract`, and each oracle's `command`. Record them — every later phase references them.
 
-### DTCG token systems (extra settings)
+### UI / design-token annex (conditional)
 
-When the **Token/theme system** is a W3C DTCG design-token file (JSON leaves carrying `$value`/`$type`, usually alongside a token build tool such as Style Dictionary / Terrazzo), resolve the additional DTCG-only settings in **[references/dtcg-tokens.md](references/dtcg-tokens.md)** so Phases 2, 4a.2, 4c, and the ticket's **Token Changes** section can author tier-correct, build-actionable guidance. (These mirror `kargha-build`'s DTCG settings — keeping them in sync is what lets a plan-authored token addition be applied without re-asking at build time.)
+When the resolved stack has a design or token surface, also resolve:
+
+- **Component library:** detect from package deps and import statements; may be none.
+- **Icon libraries:** detect from deps/imports; may be none.
+- **Token/theme system:** detect a theme object, CSS custom properties, a design-tokens file (incl. W3C DTCG JSON — see [references/dtcg-tokens.md](references/dtcg-tokens.md)), a utility-class config, or plain CSS.
+
+When the **token system** is a W3C DTCG file (JSON leaves carrying `$value`/`$type`), resolve the additional DTCG-only settings in [references/dtcg-tokens.md](references/dtcg-tokens.md) so the binder's `token_manifest` and each work item's `token_changes` can carry tier-correct, build-actionable guidance.
+
+Resolved UI values feed the binder's `design_facts` and each work item's `component_map`, `icon_map`, and `token_changes` (see [references/binder-reference.md](references/binder-reference.md) — these fields are UI-optional and omitted when the stack has no design surface).
 
 ## Workflow
 
