@@ -12,25 +12,18 @@ It **grew out of, and still contains, a strong frontend pipeline.** UI is one st
 
 `plan → deliver → build`, with `verify` (behavioral) and `validate` (visual) as the **read-only acceptance gates**, and two read-only agents as the gate workers.
 
-```
-kargha-plan ──► binder (.kargha/binders/<slug>.json)
-                  │
-kargha-deliver ───┘  builds the binder in PARALLEL WAVES
-                     onto kargha/<slug>/integration
-                       │
-                       ├─ wave: kargha-build item ─┐  (isolated worktree, one per item)
-                       ├─ wave: kargha-build item ─┤
-                       └─ wave: kargha-build item ─┘
-                                   │
-                                   ▼  each item's oracle picks ONE gate
-                       ┌───────────────────────────────┐
-                       │  behavioral  →  kargha-verify  │  ◄─ kargha-acceptance-reviewer
-                       │                                │  ◄─ kargha-safety-auditor
-                       │  visual      →  kargha-validate│
-                       └───────────────────────────────┘
-                                   │
-                                   ▼
-                       assembled integration branch  (no PR — you review + merge)
+```mermaid
+flowchart LR
+  IN[problem / feature / mock / prototype] --> PLAN[kargha-plan]
+  PLAN --> BINDER[(binder)]
+  BINDER --> DELIVER[kargha-deliver — parallel waves]
+  DELIVER --> BUILD[kargha-build — one item, worktree]
+  BUILD --> GATE{oracle type}
+  GATE -->|visual| VALIDATE[kargha-validate]
+  GATE -->|behavioral| VERIFY[kargha-verify]
+  VALIDATE -->|kickback| BUILD
+  VERIFY -->|kickback| BUILD
+  BUILD --> INT[(integration branch)]
 ```
 
 Default is parallel; kargha drops to serial only where correctness or collision demands it. The single-item escape hatch is `kargha-build` on its own. Resume is git-native — the integration branch *is* the record, so a later run picks up where a partial one stopped.
