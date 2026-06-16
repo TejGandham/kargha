@@ -11,7 +11,7 @@ The binder (`.kargha/binders/<slug>.json`) is the cross-skill contract. Each wor
 
 kargha-build is **stack-agnostic**. It does not assume a frontend framework, component library, data layer, branch convention, or repo layout. It resolves a small set of project settings up front (detect → ask), then implements the item against whatever it finds. Where this document shows a concrete tool, command, or library, treat it as an **example**, not a requirement.
 
-The UI-specific machinery — component maps, icon imports, token rules, and the visual design-validation loop — is a **conditional annex** that applies only when the work item carries those fields (`component_map`, `icon_map`, `token_changes`) or a `visual` oracle. A backend / CLI / data / IaC item skips the entire annex.
+The UI-specific machinery — component maps, icon imports, token rules, the data-layer conformance loop (Phase 5b), the dev-server lifecycle for the visual gate (Phases 6–7), and the visual design-validation loop — is a **conditional annex** that applies only when the work item carries those fields (`component_map`, `icon_map`, `token_changes`), a data-layer surface, or a `visual` oracle. A backend / CLI / data / IaC item skips the entire annex.
 
 ## Project configuration (resolve once, up front)
 
@@ -196,6 +196,90 @@ Run whichever of these the project defines. If any fails, fix it in this thread 
 
 **UI annex — token-conformance check (DTCG only, single pass folded into this phase, never a loop).** When the DTCG token settings were resolved, run the deterministic three-check scan (generated-artifact reproducibility; no primitive-tier consumption in new code; no hardcoded duplicates of existing tokens), scoped to files changed vs the integration tip. Stage new files first (`git add -A`). Full definitions in **[references/dtcg-tokens.md](references/dtcg-tokens.md)**.
 
+### Phase 5b — Data-layer conformance loop (conditional UI/data, up to 3 rounds)
+
+**Conditional — UI/data items only.** This phase runs **only when the project has a data layer** (e.g. GraphQL with fragment colocation/codegen, or REST/OpenAPI/tRPC) **and** the item's changed files contain data operations. **Skip the entire phase** when there is no data layer at all, or when no changed file contains a data operation (computed in 5b-1). A backend/CLI/IaC item with no data-layer surface skips it outright. A missing conventions doc is **not** a skip trigger: when a data layer exists but no rules doc was resolved, still run the loop and fall back to the inline read-only pass in 5b-3 (against whatever conventions the repo documents; if truly none, check only that data operations are typed — no `any` — and not duplicated, and note the thin coverage in the report).
+
+This is a UI/data-specific check, distinct from the generic acceptance gate (Phase 6). It validates that created or modified components follow the project's data-layer conventions (for GraphQL: fragment colocation, fragment/operation naming, imports per the project's GraphQL rules, query/mutation tier boundaries; for other layers: schema conformance, typed-client usage) — citing the project's resolved data-layer rules doc where present — before the visual gate and the merge.
+
+#### 5b-1. Identify target files
+
+Only validate files created or modified **in this item** that contain data-layer operations. Use the resolved `<data-layer-detector>` from Project configuration — the literal `graphql(` is just the GraphQL example; for REST/tRPC the detector is "files importing the client or calling the typed endpoints." Anchor on the resolved detector, not the example token. Exclude generated code (the `<generated-code-dir>`, if any) and test files.
+
+Compute the changed-file set **relative to the current integration tip** — the item branched off integration (Phase 4), so the integration branch is the base, **not** the default branch. Stage new files first (`git add -A`) so untracked, just-created files are included, then enumerate changed files relative to the integration tip:
+
+```bash
+integration="kargha/<slug>/integration"
+git diff --name-only --diff-filter=ACMR "$integration"...HEAD -- <app-dir/target>
+```
+
+Filter the result in memory or with the host's native tools, keeping only files that:
+
+- match the resolved framework's source extensions
+- are not under `<generated-code-dir>` when one exists
+- are not test/spec files
+- contain the resolved `<data-layer-detector>` pattern or import
+
+Use a repo-owned helper script when this logic becomes non-trivial; do not assume Bash pipelines, `grep`, `find`, or WSL exist locally. This produces a list of modified source files (excluding generated code and tests) that contain data-layer operations. If the list is empty, log "No data-layer files modified — skipping data-layer validation" and proceed to Phase 6.
+
+#### 5b-2. Per-round structure
+
+```
+round = 1
+while round <= 3:
+  # Re-run the floor if we made fixes (skip for round 1 — Phase 5 already passed)
+  if round > 1:
+    run <lint command> && <test command>
+    if fail: fix, re-run lint/test
+
+  invoke the data-layer conformance validator (see 5b-3)
+  parse the structured report
+
+  issues_count = count of Issues (not Warnings) across all files
+
+  if issues_count == 0:
+    break — validation passed
+
+  if round == 3:
+    surface residual issues to the user (AskUserQuestion OR host user-input prompt)
+    break
+
+  implement fixes based on the report   # 5b-5
+  round += 1
+```
+
+#### 5b-3. Invoke the data-layer conformance validator
+
+Run a **read-only conformance check** scoped to the target file list from 5b-1. **Strongly prefer a separate read-only subagent OR host worker so the check runs in an isolated context** — the implementer must not grade its own work. If the project provides a dedicated data-layer conformance validator (a subagent, host worker, or skill — e.g. a GraphQL-conventions checker for a GraphQL/Apollo stack, or the project's REST/OpenAPI/tRPC schema-conformance equivalent), use it. Pass it the file list and ask it to check each file against the project's data-layer rules.
+
+Only when the environment provides no subagent, host worker, OR skill mechanism, fall back to an inline read-only pass against the project's data-layer-rules doc, noting that this loses context isolation (the implementer is reviewing its own output). Either way the validator must be **read-only** — it reports, it never edits — and **MUST** return a per-file `STATUS: PASS | ISSUES_FOUND` line plus a summary containing an explicit issue count (e.g. `Issues found: N across M files`), so the loop parses the exit condition deterministically.
+
+#### 5b-4. Parse the report and decide
+
+The report MUST include a per-file `STATUS: PASS | ISSUES_FOUND` line and a summary line with an explicit issue count (e.g. `Issues found: N across M files`); the loop parses that count as its exit condition. Since 5b-1 already excludes generated code and tests, only Issues in non-generated files count.
+
+| Condition | Action |
+|-|-|
+| `Issues found: 0` (all files PASS) | Exit loop — validation passed |
+| Issues found, round < 3 | Fix issues in the main thread, re-run lint/test, re-validate |
+| Round 3 reached with residual issues | Stop — surface to the user via `AskUserQuestion` OR host user-input prompt; record the residual as a `KARGHA-DEFER` declared-debt marker per [references/declared-debt.md](references/declared-debt.md) |
+
+**Warnings are acceptable** — only Issues (clear rule violations) trigger fixes. Do not attempt to fix Warnings.
+
+#### 5b-5. Implement fixes (main thread)
+
+When fixing issues between rounds:
+
+- Use the report's category and line hints to locate each violation.
+- Cross-reference the project's data-layer-rules doc for the correct pattern when the category isn't self-explanatory.
+- After fixes, re-run `<lint command> && <test command>` before the next validation round — fixes must not break the floor.
+
+#### 5b-6. Edge cases
+
+- **The validator crashes or returns no output:** treat as a failed round. Retry once. If it fails again, skip data-layer validation and note the failure in the final report — don't block on a tooling failure.
+- **All issues are in generated code:** shouldn't happen (generated code is excluded in 5b-1), but if it does, treat as a pass.
+- **A file was deleted between rounds:** re-compute the target file list before each round to avoid passing stale paths.
+
 ### Phase 6 — Acceptance loop
 
 Once the floor is clean, run the item's acceptance check through the verification gate. The gate is **read-only** — it reports, it never edits — and it runs in a fresh, thin context (only the worktree, the binder, and the item's `oracle`/`contract`). See [references/verification-gate.md](references/verification-gate.md).
@@ -204,8 +288,19 @@ Once the floor is clean, run the item's acceptance check through the verificatio
 
 **Choose the gate by oracle type:**
 
-- **`oracle.type == visual`** → `kargha-validate`. It compares rendered output against the design and needs the dev server up (UI annex; resolve `<dev-server-port>`, the design source, and the item's `design_reference`). The per-round capture/compare mechanism `kargha-validate` uses is in **[references/design-validation-loop.md](references/design-validation-loop.md)**. Skip the visual gate when `design_reference` is `none`.
+- **`oracle.type == visual`** → `kargha-validate`. It compares rendered output against the design (UI annex; resolve `<dev-server-port>`, the design source, and the item's `design_reference`). The per-round capture/compare mechanism `kargha-validate` uses is in **[references/design-validation-loop.md](references/design-validation-loop.md)**. Skip the visual gate when `design_reference` is `none`. **Before invoking `kargha-validate`, the app must be up** — bring it up per the dev-server lifecycle below.
 - **any other type** (`unit` / `integration` / `e2e` / `smoke`) → `kargha-verify`. It dispositions each of the oracle's `assertions` against the actual diff, and — when the item declares an `ITEM_CONTRACT` — checks the diff against the external contract artifact (a type-checker, schema, or contract test), not against the binder's claim.
+
+**Dev-server lifecycle for the visual gate (conditional — `oracle.type == visual` only).** A `kargha-verify` (non-visual) item skips all of this. For a visual item, `kargha-validate` needs the app running before it can capture and compare, so bring it up here, before invoking the gate.
+
+**First, honor a provided env.** The env may already be supplied by the binder's `env_contract` or by the orchestrator (a wave-bound env, started once and torn down once for the whole wave per [references/integration-branch.md](references/integration-branch.md)). When the wave env is present, use the env it exposes (`env_contract.command`, and `env_contract.isolation_params` such as `PORT` when `supports_isolation` is true) instead of starting your own — and **do not tear it down** (the orchestrator owns it). Only when the item is directly invoked with no provided env do you manage the dev server yourself, per the steps below.
+
+Do not assume Bash, WSL, POSIX background syntax, `/tmp`, `curl`, `grep`, `lsof`, or `kill` exist on the developer machine. Use the host's native process and HTTP facilities, or a repo-owned helper script, and record the exact command/handle you used.
+
+- **6-dev-a. Check port availability** with a host-native mechanism (a Python socket probe, a PowerShell TCP lookup, the project's dev-server status command, or the platform's equivalent). Check both `<dev-server-port>` and `<backend-port>` when the dev target starts a backend. **If something is already on either port, bail and ask the user to stop it first — never stop another process's dev server.** (This guards against *other* processes. When you must **restart** your own dev server — e.g. after a token rebuild or a degraded server mid-loop — first stop the recorded handle to free the port, then repeat these steps; otherwise this check sees your own still-running server and bails.)
+- **6-dev-b. Start the dev server as a managed background process/session.** Record its process id or host process handle (call it `DEV_SERVER_PID` or the host equivalent), plus its log location. Do not use POSIX `&` unless the host shell is known to support it. If the dev target transitively starts a backend/API service (resolved in Project configuration), that service comes up on `<backend-port>` too — both are needed when the view depends on the backend for data. Note that port for teardown in Phase 7.
+- **6-dev-c. Health-poll the actual `design_reference` route** (not just `/`) with a host-native HTTP client until it returns an expected status such as `200`, `307`, or `308` — many dev servers compile/warm pages on demand, so `/` warming proves nothing about the target view. Use an explicit retry limit around **60 seconds** and capture failure output. If the route is not responding after ~60s, stop the recorded handle and bail with the error (common causes: port conflict, a build error the floor didn't catch, missing env vars). **A bare 2xx/3xx is not proof the view rendered when it's behind auth** — an unauthenticated request to a protected route can return `200` on a login page or `3xx` to `/login`, passing this poll while the target view is still unreachable. If the route requires authentication, detect the auth-redirect / login-page response here and treat establishing a logged-in session (and ensuring any backend service the view needs is up) as a `kargha-validate` prerequisite, not something this poll satisfies — see [references/design-validation-loop.md](references/design-validation-loop.md) (7a).
+- **6-dev-d. Store the recorded handle** (`DEV_SERVER_PID` and `<backend-port>`, if any) for the Phase 7 teardown.
 
 **Kickback and caps.** On any finding, the gate kicks the work back to this skill for **bounded self-correction**, then re-runs on the corrected diff. Per [references/verification-gate.md](references/verification-gate.md) the caps differ by gate:
 
@@ -214,9 +309,13 @@ Once the floor is clean, run the item's acceptance check through the verificatio
 
 Only on cap exhaustion does the gate halt or escalate — otherwise it self-corrects within the caps and moves on.
 
-### Phase 7 — (cleanup for the visual gate)
+### Phase 7 — Dev-server teardown (cleanup for the visual gate)
 
-When the visual `kargha-validate` loop started a dev server, stop only the process this run started, using the host's native process handle — never another process's server. This phase is a no-op for non-visual items. (Port-conflict and process-handling details live in [references/design-validation-loop.md](references/design-validation-loop.md).)
+**Conditional — visual items that started a dev server.** A non-visual item is a no-op here. **Always runs when this run started a server**, regardless of outcome — whether the skill succeeded, failed at a gate, or errored after bring-up, the ports it opened must be freed. Structure the teardown to run on every exit path after Phase 6's bring-up.
+
+Stop **only the process or process tree this run started**, using the host's native process handle (the `DEV_SERVER_PID` recorded in 6-dev-b/d). If the port is still held afterward, clean up an orphan only when you can prove it was spawned by this run's recorded dev command — **never stop an unrelated process** that happens to bind the same port (the mirror of 6-dev-a's "do not stop another process's dev server"). Apply the same guard to `<backend-port>` when the dev target started a backend/API service: stop only what this run started, then free the backend port too.
+
+**Do not tear down a provided env.** When Phase 6 used a wave-bound env from the binder's `env_contract` / the orchestrator instead of starting its own server, leave it running — the orchestrator owns its lifecycle and tears it down once for the whole wave (see [references/integration-branch.md](references/integration-branch.md)). This phase only stops servers *this run* started. If the skill exited before Phase 6 brought up a server (e.g. at a Phase 1 gate), this phase is a no-op. (Port-conflict and process-handling details also live in [references/design-validation-loop.md](references/design-validation-loop.md).)
 
 ### Phase 8 — (reserved)
 
@@ -272,6 +371,9 @@ Brief summary to the user (~8 lines):
 - **Don't clobber an existing worktree.** If `git worktree add` fails, stop and ask — it usually means a resumable prior run.
 - **UI rules are conditional.** Component maps, icon imports, token rules, and the visual `kargha-validate` loop apply only when the item carries `component_map` / `icon_map` / `token_changes` or a `visual` oracle. A backend / CLI / data / IaC item skips the whole annex.
 - **The visual gate is expensive.** Each `kargha-validate` round can spawn a browser session and capture/compare workers; the loop is capped — don't exceed it.
+- **Data-layer conformance is read-only and isolated.** The Phase 5b loop runs a separate read-only subagent/host worker so the implementer doesn't grade its own work; the validator returns a `STATUS` + `Issues found: N` contract the loop parses. It's conditional — no data layer, or no changed file with a data op, skips it. Compute the changed-file set vs the **integration tip**, not the default branch.
+- **The visual gate needs the app up — and the route, not `/`.** Health-poll the actual `design_reference` route (200/307/308, ~60s cap); a 2xx/3xx on a protected route can be the login page, not the view. Honor a provided wave env (`env_contract`/orchestrator) when present; else manage the dev server yourself.
+- **Never stop another process's dev server.** Bring-up bails if a port is already taken; teardown stops only the handle this run recorded (frontend and backend ports), and leaves a wave-bound env alone — the orchestrator owns that one. Teardown runs on every exit path after bring-up.
 - **Declare deferrals inline.** A skipped test or stubbed dependency gets a `KARGHA-DEFER` marker at the site; the report surfaces every one. A deferred item is never reported as fully done without its list.
 - **Opt-outs are explicit and surfaced.** When `oracle.opt_out` is set, skip acceptance (not the floor), record the reason, and report it. There is no silent opt-out.
 - **The floor is non-negotiable.** A change that won't compile / type-check / lint does not earn an acceptance review — it earns a surfacing.
