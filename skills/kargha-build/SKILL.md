@@ -1,61 +1,52 @@
 ---
 name: kargha-build
-description: Use when implementing a kargha-plan frontend ticket with a Design Reference section, picking up frontend work into an isolated git worktree, running lint/test plus optional data-layer and visual-fidelity validation, and opening a PR. Also use for narrow frontend inspection aids that touch auth, routing, or security UX, such as holding a login screen for manual inspection. Do not use for non-frontend tickets.
+description: Use when implementing one work item from a kargha binder in an isolated git worktree — stack-agnostic (frontend, backend, CLI, data, IaC, …) — running the project's lint/test/build plus the item's acceptance check, tagging commits, and merging into the per-binder integration branch (no PR). Trigger phrases: "build this binder item", "implement work item `<id>`", "kargha-build `<binder> <id>`".
 ---
 
+kargha-build takes **one work item from a validated binder** and carries it from pickup to a tagged set of commits merged into the binder's **integration branch** — all inside an isolated git worktree. It is stack-agnostic: the same flow implements a frontend view, a backend endpoint, a CLI command, a data migration, or an IaC change. It does **not** open a PR. The user reviews and merges the integration branch.
 
-
-Drive a frontend ticket from a pickup-eligible status (e.g. "Backlog"/"To Do") all the way to a review-pending status with an open PR, including visual design validation. The ticket must have been authored by `kargha-plan` and contain a **Design Reference** section with the design file path, view ID, and navigation instructions, plus a **Component-to-Library Map**.
-
-This skill combines a generic ticket-handling pipeline (Phases 0–4 — fetch, gate, pick up, worktree) with two frontend-specific validation loops — an optional data-layer conformance check (Phase 5b, only when the project has a data layer such as GraphQL) and an optional visual design comparison (Phase 7, only when a design-validation tool/skill is available) — then opens a PR via the project's VCS mechanism.
+The binder (`.kargha/binders/<slug>.json`) is the cross-skill contract. Each work item carries an `oracle` (its acceptance check) and an optional `contract` (the interface it exposes or consumes). kargha-build reads the binder — it never writes to it during a run (see [references/binder-reference.md](references/binder-reference.md)). The planning counterpart is `kargha-plan`; the read-only acceptance and visual gates are `kargha-verify` / `kargha-validate`.
 
 ## How this skill adapts to your project
 
-This skill is stack-agnostic and ticketing-agnostic. It does **not** assume a specific component library, icon set, theme system, frontend framework, data layer, ticketing system, branch convention, or repo layout. Instead, it resolves a small set of project settings up front (detect → ask), then implements against whatever it finds:
+kargha-build is **stack-agnostic**. It does not assume a frontend framework, component library, data layer, branch convention, or repo layout. It resolves a small set of project settings up front (detect → ask), then implements the item against whatever it finds. Where this document shows a concrete tool, command, or library, treat it as an **example**, not a requirement.
 
-- **Ticket source:** the ticket may live in a ticketing system (JIRA, Linear, GitHub Issues, …) **or** be a plain Markdown/JSON ticket file produced by `kargha-plan`. Both input modes are supported — Phase 0a resolves which mode is active.
-- **Component library:** any library, several libraries, or none. With no library, the Component-to-Library Map's "custom" entries are the build list.
-- **Theme/token system:** a theme object, CSS custom properties, a design-tokens file, a utility-class framework, or plain CSS. The "no hardcoded values that duplicate tokens" rule holds regardless.
-- **Data layer:** GraphQL (with fragment colocation/codegen), REST/OpenAPI types, tRPC, generated TS types, or none. The data-conformance loop (Phase 5b) is **conditional** on the project actually using a data layer with documented conventions.
-- **Toolchain:** lint / test / build / dev / install commands run via whatever package manager and task runner the project uses (npm/pnpm/yarn scripts, Nx, Turborepo, Make, …).
-- **Design-validation:** an optional fidelity-check tool/skill. If the environment provides one, Phase 7 runs it as a loop; otherwise Phase 7 degrades to a manual visual checklist.
-
-Where this document shows a concrete tool, command, library, or status name, treat it as an **example**, not a requirement.
+The UI-specific machinery — component maps, icon imports, token rules, and the visual design-validation loop — is a **conditional annex** that applies only when the work item carries those fields (`component_map`, `icon_map`, `token_changes`) or a `visual` oracle. A backend / CLI / data / IaC item skips the entire annex.
 
 ## Project configuration (resolve once, up front)
 
-Resolve each setting in this order: **explicit user input → detect from the repo → ask the user** (batch all unknowns into a single `AskUserQuestion` OR host user-input prompt). Do not prompt for things you can detect. **When detection conflicts with explicit user input or the project's documented/blessed stack, the stated stack wins — confirm it rather than asserting what's merely present** (a repo can be mid-migration, so a detected framework/library shows the *current* state, not the intended target).
+Resolve each setting in this order: **explicit user input → detect from the repo → ask the user** (batch all unknowns into a single question). Do not prompt for things you can detect. **When detection conflicts with explicit user input or the project's documented/blessed stack, the stated stack wins** — confirm it rather than asserting what's merely present (a repo can be mid-migration).
 
 | Setting | What it is | How to resolve |
-| ------- | ---------- | -------------- |
-| **Frontend app dir** | Where components / routes / styles live, and its task-target name | Detect the package depending on the UI framework (a `package.json` with `react`/`next`/`vue`/`svelte`); in a monorepo pick the app the ticket targets; the frontend may also live in a non-root **subdir** of a polyglot repo (e.g. `ui/` beside `backend/`, not a monorepo per se) — root all paths/commands there; else ask |
-| **Component library** | UI-primitive library/libraries the project uses (0..n) and its installed path | Detect from `package.json` deps + existing imports; resolve the install path from the manifest; may legitimately be none |
-| **Icon libraries** | Primary icon source + optional fallbacks | Detect from deps/imports; may be none |
-| **Theme/token system** | Source of truth for colors / spacing / radius / typography / shadows | Detect: theme object, CSS custom properties, a design-tokens file (incl. W3C DTCG JSON — see references/dtcg-tokens.md), a utility-class config, or plain CSS |
-| **Data layer** | The API the UI reads from, and how to detect operations in source | Detect: a GraphQL schema + codegen, OpenAPI/REST types, a tRPC router, generated TS client types; may be none. Note the detector `<data-layer-detector>` (e.g. files containing `graphql(`) and the generated-code directory `<generated-code-dir>` to exclude, both used in Phase 5b (a project with no codegen may have no `<generated-code-dir>`) |
-| **Ticketing system access** | Where the ticket lives and how to read/update it | Ask/detect: a ticketing system (which one + how to call it — MCP, CLI like `gh`/`glab`, REST) **or** a plain Markdown/JSON ticket file path — Phase 0a resolves the mode |
-| **Pickup statuses** | The set of statuses a ticket may be in to be picked up | Ask/detect; default to the project's first two backlog-ish states (e.g. "Backlog", "To Do"); for file tickets, the `status` front-matter field |
-| **In-progress status** | The status to move the ticket to on pickup | Ask/detect (e.g. "In Progress") |
-| **Review status** | The status to move the ticket to once the PR is open | Ask/detect (e.g. "In Review", "Ready for review") |
-| **Toolchain commands** | install / lint / test / build / dev invocations | Detect from package scripts + task runner; record `<install command>`, `<lint command>`, `<test command>`, `<build command>`, `<dev command>`. When **both** package scripts and a task runner (Make/Nx/Turbo/…) exist, prefer the project's documented entrypoint (rules/AGENTS/contributing doc) — a bare script pick can skip orchestrated lint/coverage the runner bundles |
-| **Dev server URL/port** | Where the running app is served (and optional backend service + port) | Detect from dev-server config / framework defaults; record `<dev-server-port>`, and note any backend the dev target starts transitively and its port `<backend-port>` |
-| **Default branch** | Base branch for worktrees | Detect via `git remote show origin` (the `HEAD branch:` line), else whichever of `main`/`master` exists. Don't rely on `git symbolic-ref refs/remotes/origin/HEAD` — it's unset on many fresh clones (errors / returns nothing) |
-| **Worktree root** | Parent dir for per-ticket worktrees | Ask/default to a sibling dir (e.g. `../<repo>-worktrees/`) |
-| **Branch convention** | Branch-name template — must embed the ticket id | Ask/detect; default `<prefix>_<ticket-id>_<slug>`; the embedded ticket id lets the PR step recover it |
-| **PR conventions** | Target repo, reviewers, labels, title prefix | Detect repo from the git remote; ask/detect reviewer-selection rule, label set, and ticket-id title prefix (any may be none). The reviewer-selection rule must exclude the PR owner from reviewing their own PR (e.g. pick the other member of a fixed reviewer set) |
-| **Project rules** | Component-structure and data-layer convention docs | Detect: contributor docs, lint configs, or rules files; cite them during implementation/fixes if present, else fall back to inline generic conventions |
-| **Repo policy** | Branch/CI/ruleset/deployment policy, only when the ticket touches those areas | Read root/area `AGENTS.md`, existing workflows, CI docs, current rulesets/merge settings/bypass actors when remote policy is in scope. For details load [references/ci-policy.md](references/ci-policy.md) and [references/policy-yagni.md](references/policy-yagni.md) |
-| **Design-validation** | Optional fidelity-check tool/skill | Use if the environment provides one (a skill that screenshots the running app and diffs it against the design); otherwise Phase 7 becomes a manual checklist |
+|-|-|-|
+| **App dir / target** | Where the item's code lives, and its task-target name | Detect from the binder's `scope.included` and the repo layout; in a monorepo or polyglot repo, root all paths/commands at the area the item targets; else ask |
+| **Toolchain commands** | install / lint / test / build / typecheck invocations | Detect from package scripts + task runner (npm/pnpm/yarn, Make, Nx, Turbo, Cargo, Poetry, …); record `<install command>`, `<lint command>`, `<test command>`, `<build command>`, `<typecheck command>`. When both package scripts and a task runner exist, prefer the project's documented entrypoint — a bare script pick can skip orchestrated lint/coverage the runner bundles |
+| **Env command** | The dev/test env command and its isolation params | Read the binder's `env_contract` (`command`, `supports_isolation`, `isolation_params`); see [references/integration-branch.md](references/integration-branch.md) for env injection |
+| **Default branch** | The repo's mainline (only the fallback base, not the build base) | Detect via `git remote show origin` (the `HEAD branch:` line), else whichever of `main`/`master` exists. Don't rely on `git symbolic-ref refs/remotes/origin/HEAD` — it's unset on many fresh clones |
+| **Integration branch** | The binder's integration branch and its worktree | `kargha/<slug>/integration`, where `<slug>` is the binder's `slug` field. This — not the default branch — is the base for the item's worktree (see Phase 4) |
+| **Worktree root** | Parent dir for per-item worktrees | Ask/default to a sibling dir (e.g. `../<repo>-worktrees/`) |
+| **Git identity** | Author identity for commits | `git config user.name` / `user.email`. If unset, ask once or record an explicit "unattributed" note — do not silently invent one. This is **commit authorship only**, not a ticketing identity |
+| **Project rules** | Component-structure, data-layer, and convention docs | Detect: contributor docs, lint configs, rules files; cite them during implementation/fixes if present, else fall back to inline generic conventions |
+| **Repo policy** | Branch/CI/ruleset/deployment policy, only when the item touches those areas | Read root/area `AGENTS.md`, existing workflows, CI docs when remote policy is in scope. For details load [references/ci-policy.md](references/ci-policy.md) and [references/policy-yagni.md](references/policy-yagni.md) |
 
-Record the resolved values — every later phase references them. In this document, placeholders like `<frontend-app>`, `<component-lib>`, `<lint command>`, `<dev command>`, `<dev-server-url>`, `<dev-server-port>`, `<backend-port>`, `<data-layer-detector>`, `<generated-code-dir>`, `<default-branch>`, `<ticket-id>`, `<pickup-statuses>`, `<in-progress-status>`, `<review-status>` refer to these resolved settings.
+### Conditional UI/data annex settings (resolve only when the item carries the surface)
 
-The current user's identity is **not** hardcoded — resolve it dynamically at the start of every run (Phase 0).
+These apply **only** when the work item has `component_map` / `icon_map` / `token_changes` or a `visual` oracle. A non-UI item skips them entirely.
+
+| Setting | What it is | How to resolve |
+|-|-|-|
+| **Component library** | UI-primitive library/libraries (0..n) and install path | Detect from `package.json` deps + existing imports; may be none — then the item's `component_map` "custom" entries are the build list |
+| **Icon libraries** | Primary icon source + fallbacks | Detect from deps/imports; may be none |
+| **Theme/token system** | Source of truth for colors / spacing / radius / typography | Detect: theme object, CSS custom properties, a design-tokens file (incl. W3C DTCG JSON — see [references/dtcg-tokens.md](references/dtcg-tokens.md)), a utility-class config, or plain CSS |
+| **Data layer** | The API the UI reads from, if any | Detect: a GraphQL schema + codegen, OpenAPI/REST types, a tRPC router, generated TS client types; may be none. Note the detector `<data-layer-detector>` and the generated-code dir `<generated-code-dir>` to exclude |
+| **Dev server URL/port** | Where the running app is served | Detect from dev-server config / framework defaults; record `<dev-server-port>` and any transitively-started backend port `<backend-port>`. Used only by the visual `kargha-validate` loop |
+| **Design source** | The design file/prototype the item validates against | Read the binder's `design_facts.source` and the item's `design_reference` (view/route ID, or the literal `none`) |
+
+Record the resolved values — every later phase references them.
 
 ### DTCG token systems
 
-When the theme/token row detects a **W3C DTCG-format design-token file system** (JSON leaves carrying `$value`/`$type`, usually with a token build tool like Style Dictionary / Terrazzo in devDependencies), resolve the DTCG-only settings and build the **token manifest** as described in **[references/dtcg-tokens.md](references/dtcg-tokens.md)**. Everything DTCG-specific in this skill — the manifest, the autonomous token-add procedure (Phase 4d), and the Phase 5 token-conformance check — is defined there and applies only when these settings were resolved.
-
-This machinery keys off the **project's** token system, not the design's. A DTCG *design* export mapped into a **non-DTCG** project (e.g. a component-library theme object or a CSS-variable token file) uses the project's own token mechanism via `DESIGN_TOKEN_MAP`/`TOKEN_CHANGES` and **skips** all of it — the manifest, 4d, and the token-conformance check.
+When the theme/token row detects a **W3C DTCG-format design-token file system** (JSON leaves carrying `$value`/`$type`, usually with a token build tool like Style Dictionary / Terrazzo in devDependencies), resolve the DTCG-only settings and build the **token manifest** as described in **[references/dtcg-tokens.md](references/dtcg-tokens.md)**. Everything DTCG-specific — the manifest, the autonomous token-add procedure, and the token-conformance check — is defined there and applies only when the item carries a UI surface and these settings were resolved. A DTCG *design* export mapped into a **non-DTCG** project uses the project's own token mechanism and skips all of it.
 
 ---
 
@@ -63,411 +54,226 @@ This machinery keys off the **project's** token system, not the design's. A DTCG
 
 ### Always-on mutation guard
 
-Before any file mutation, apply [references/worktree-safety.md](references/worktree-safety.md): assert the intended root with `git rev-parse --show-toplevel`, check the current branch with `git branch --show-current`, and refuse implementation edits when the root or branch is wrong. Repeat this after creating a worktree, changing directories, resuming after context compaction, or any failed patch. After Phase 4b, the intended root is the implementation worktree, not the original checkout.
+Before any file mutation, apply [references/worktree-safety.md](references/worktree-safety.md): assert the intended root with `git rev-parse --show-toplevel`, check the current branch with `git branch --show-current`, and refuse implementation edits when the root or branch is wrong. Repeat this after creating a worktree, changing directories, resuming after context compaction, or any failed patch. After Phase 4 creates the worktree, the intended root is the implementation worktree, not the original checkout. The binder is **read-only** to build — never edit it.
 
-### Phase 0a — Resolve the ticket source mode
+### Phase 0 — Classify intent before choosing a workflow
 
-Before resolving identity or fetching anything, determine which **ticket mode** is active — every later phase (0, 1, 2a, 3a, 3b, 9) branches on it.
+Classify the request before framing the work:
 
-- **Ticketing-system mode:** the input is a ticketing-system reference — an id/key (e.g. a project-prefixed key), or a ticket URL. Resolve which system it is (the one resolved in the "Ticketing system access" config row) and how to call it (MCP, a CLI like `gh`/`glab`, or REST).
-- **File-ticket mode:** the input is a path to a Markdown/JSON ticket file produced by `kargha-plan`. Note the path; the front-matter (or top-level JSON fields) and body are read directly.
-
-Resolve the mode in this order: explicit user input → detect from the reference shape (a filesystem path that exists ⇒ file-ticket; an id/key/URL ⇒ ticketing-system) → ask the user. Record `TICKET_MODE` (`ticketing-system` | `file-ticket`) for the rest of the run.
-
-**File-ticket lifecycle-field contract.** `kargha-plan` file tickets carry front-matter `{id, title, type, parent, depends_on, estimate}` — there is **no** `status` and **no** `assignee` field by default. So in file-ticket mode the status and assignee gates (Phase 1) are informational-only and pass when the field is absent, the pickup assign/transition steps (Phase 3) are additive writes (they create the field if missing) or no-ops, and the review-status write (Phase 9) is additive. This is expected, not an edge case. If a file ticket *does* carry `status`/`assignee` fields (a custom producer), honor them as real gates.
-
-### Phase 0b — Classify intent before choosing a workflow
-
-Classify the user's request before framing the work:
-
-- **implementation of an approved plan** — normal `kargha-build` ticket execution
+- **implementation of a binder work item** — normal `kargha-build` execution (Phase 1 onward)
 - **inspection aid** — behavior works, but the user needs to see or hold a state such as a login screen
 - **bug fix** — behavior is broken or regressed
-- **product feature** — new user-facing behavior not already approved in the ticket
+- **product feature** — new behavior not already in the binder
 - **CI/policy change** — workflow, ruleset, branch, deployment, generated-contract, or environment behavior
 
-If the user corrects the category, drop the old framing immediately. Do not describe an inspection aid as a bug. For inspection aids and CI/policy changes, keep scope explicit and temporary/contained unless the user asks for a permanent product change.
+If the user corrects the category, drop the old framing immediately. For inspection aids and CI/policy changes, keep scope explicit and contained unless the user asks for a permanent product change.
 
-**Ticketless inspection-aid mode.** If the request is a narrow frontend inspection aid and no `kargha-plan` ticket exists, do not force the ticket gates. Use this limited flow:
+**Ticketless inspection-aid mode.** If the request is a narrow inspection aid and no binder work item drives it, do not force the binder gates. Use this limited flow:
 
-1. Resolve the frontend app, toolchain, default branch, worktree root, and relevant project rules from Project configuration.
-2. State the high-impact mutation preview from Phase 4d and wait for confirmation before editing.
-3. Create an isolated worktree from the default branch with a branch like `inspect_<short-slug>` or the project's equivalent.
+1. Resolve the app dir/target, toolchain, default branch, worktree root, and relevant project rules from Project configuration.
+2. State the high-impact mutation preview from Phase 4 and wait for confirmation before editing.
+3. Create an isolated worktree from the default branch with a branch like `inspect_<short-slug>`.
 4. Run the mutation guard before every edit.
 5. Implement only the confirmed inspection aid.
 6. Run the relevant lint/test/build checks.
-7. Report the worktree path and changed files. Do not move tickets or open a PR unless the user explicitly asks.
+7. Report the worktree path and changed files. Do not merge into integration unless the user explicitly asks.
 
-This mode is for observability/inspection only. If the change becomes product behavior, convert it to a normal ticket or explicit product-feature request.
+This mode is for observability/inspection only. If the change becomes product behavior, convert it to a binder work item or an explicit product-feature request.
 
-### Phase 0 — Resolve the current user
+### Phase 1 — Input, validate, and gate the work item
 
-Before any gates or ticket work, look up who "the current user" is from the **authoritative source for the configured ticket mode**.
+The input is `(binder path, work-item id)` — **not** a ticket file. Resolve both from the user (default binder location `.kargha/binders/<slug>.json`; see [references/binder-reference.md](references/binder-reference.md)).
 
-- **Ticketing-system mode:** call the system's "who am I" operation (e.g. a JIRA user-info call, `gh api user`, the Linear `viewer` query) to get the current user's id and email/handle. This is the only authoritative identity for the assignee gate and the assignment side-effect.
-- **File-ticket mode:** there is no remote identity service. Fall back to the local git/config identity (`git config user.email`, `git config user.name`) for PR ownership and — only when the file format actually carries an `assignee` field — the assignment field; otherwise the git identity is informational. If `git config` has no `user.email`/`user.name`, ask the user once for an identity to record, or proceed with an explicit "unassigned" note — do not silently invent one.
+Three gates, **all must pass**. Any failing is an immediate hard stop — report and exit, no "continue anyway?".
 
-Cache the resolved values for the rest of the run:
+**Gate 1 — The binder validates.** Run:
 
-- `CURRENT_USER_EMAIL` — used for the assignee gate (Phase 1) and error messages
-- `CURRENT_USER_ID` — the system's account/user identifier, used for the assignment side-effect (Phase 3)
-
-**Identity normalization (provider-specific).** Different systems return identity fields under different shapes and casings — e.g. one system may return a snake_case `account_id` from its "who am I" call while its issue payloads use camelCase `assignee.accountId`. Both refer to the same identity; normalize them into the single `CURRENT_USER_ID` variable and compare that throughout the skill. Keep this normalization note only where the configured provider needs it.
-
-Don't fall back to the OS `$USER` or the harness email for a **ticketing-system** identity — those are the OS/VCS identity, which often doesn't match the ticketing one. Only file-ticket mode legitimately uses the git/config identity.
-
-If the identity lookup fails in ticketing-system mode, bail — the whole skill is predicated on knowing who "me" is.
-
-### Phase 1 — Fetch, gate, and validate it's a frontend ticket
-
-Resolve the ticket reference from the user. Depending on mode:
-
-- **Ticketing-system mode:** take the ticket id/key (or extract it from a ticket URL), then fetch the ticket with its description, comments, status, assignee, and type. Parse the response per that system's payload shape (e.g. JIRA nests fields under `fields`, with comments under `fields.comment.comments[]`; GitHub Issues returns `body`/`state`/`assignees`; Linear returns the issue node). Render the description/body as Markdown.
-- **File-ticket mode:** read the Markdown/JSON ticket file produced by `kargha-plan`. The "status"/assignee live in the front-matter (or top-level JSON fields); the body is the ticket description. There are no remote comments — any review notes live inline or in sibling files the ticket references.
-
-Three gates, **all must pass**. Any failing is an immediate hard stop — no `AskUserQuestion` OR host user-input prompt, no "want me to continue anyway?", just report and exit.
-
-**Gate 1 — Status.** The ticket's status/state must be in the configured **pickup-eligible set** `<pickup-statuses>` (e.g. exactly `"Backlog"` or `"To Do"`).
-
-If it's any other status (e.g. an in-progress, review, or done state), bail with:
-
-- The ticket id and current status
-- Who it's assigned to (if anyone)
-- A note that this skill only picks up tickets in the pickup-eligible statuses
-
-For file tickets with no `status` field, treat the gate as passing (there is no workflow to violate) and note it. **This is the norm for `kargha-plan` file tickets** — their front-matter carries no `status` field (see Phase 0a), so this gate is informational in the common file-ticket case. Apply it as a real gate only when the file actually carries a `status` field.
-
-**Gate 2 — Assignee.** The ticket must be either **unassigned** **or** **assigned to the current user**.
-
-Apply the comparison in this order (identity-normalized, id first, then email/handle fallback):
-
-1. If the assignee is empty/null, the gate passes.
-2. If the assignee has an account/user id, compare to `CURRENT_USER_ID`. Match passes; mismatch bails.
-3. Only if the assignee id is missing, fall back to comparing the assignee email/handle against `CURRENT_USER_EMAIL`.
-
-On failure, bail with the ticket id, current assignee, and `CURRENT_USER_EMAIL`. For file tickets with no assignee field, the gate passes — and **`kargha-plan` file tickets carry no `assignee` field by default** (see Phase 0a), so this gate is informational in the common file-ticket case. Apply it as a real gate only when the file actually carries an `assignee` field.
-
-**Gate 3 — Frontend ticket validation.** Parse the description/body for the **"Design Reference"** section. This section must contain at minimum:
-
-- `**Design file:**` with a file path
-- `**View:**` with a view/page ID and navigation instructions — or the literal `none` (optionally followed by an annotation, e.g. `\`none\` — setup ticket, design validation not applicable`) for a setup/foundation ticket (see below)
-
-If the Design Reference section is missing, bail with: "This ticket does not contain a Design Reference section. It was likely not planned by `kargha-plan`. Use a non-frontend implementation skill/agent to implement it instead."
-
-When matching these field labels (here and in the extraction below), tolerate formatting variations — a ticketing system may have round-tripped the Markdown to rich text and back, turning `**Design file:**` into `*Design file:*`, `<b>Design file:</b>`, or plain `Design file:`. Match the label text case-insensitively, ignoring surrounding emphasis/markup; don't bail on a present-but-reformatted section.
-
-**Setup/foundation tickets.** `kargha-plan` emits foundation/setup tickets (library + theme/token bootstrap, fonts) with `**View:** \`none\` — setup ticket, design validation not applicable`. These pass Gate 3 (the Design Reference section is present), but they have no view to validate: when `DESIGN_VIEW` resolves to `none`, **skip the design-validation loop (Phase 7) and its dev-server prerequisite (Phase 6)** — there is nothing to capture-and-compare — and don't fail the missing "Design validation passes" acceptance criterion. Implement, lint/test, run the token-conformance check, and open the PR. (A setup ticket may still touch the data layer and tokens, so Phases 5/5b still apply.)
-
-**Extract and cache** the following from the ticket description for use in later phases:
-
-- `DESIGN_FILE_PATH` — from the `**Design file:**` line
-- `DESIGN_VIEW` — view/page ID from the `**View:**` line: the backtick-delimited identifier before the em-dash separator (`kargha-plan` emits `**View:** \`<page id>\` — <navigation>`). If it isn't backtick-delimited, take the page-id token between `**View:**` and the em-dash.
-- `DESIGN_NAVIGATION` — navigation instructions from the `**View:**` line (text after the `—`)
-- `APP_ROUTE` — prefer the **`Served URL`** line in the "Route / Layout" section (`kargha-plan` emits the concrete live path there); use it verbatim. Only if that line is absent, fall back to deriving the URL from the route declaration in a framework-appropriate way — file-based routers from the file path (e.g. a page at `<frontend-app>/.../{{EXAMPLE_ROUTE}}/page.tsx` yields `/{{EXAMPLE_ROUTE}}`), config-based routers from the declared path. If the derived path has a dynamic segment (`[id]`, `:id`), substitute a representative value from the design's mock data (e.g. `/projects/1`) — the health check and validator can't load a literal `[id]`.
-- `COMPONENT_LIBRARY_MAP` — the full "Component-to-Library Map" table (the binding contract for fidelity fixes)
-- `ICON_MAPPING` — the "Icon Mapping" table (design icon → Source → concrete import) and any "Missing Icons" list, if present. Implement icons with exactly these imports; for a Missing-Icons entry, add the custom SVG the plan flagged (don't silently substitute a different library icon)
-- `DESIGN_TOKEN_MAP` — the "Design Token Map" table (design token → project token, with tier), and the sibling `00-token-map.md` if the ticket cites one. This is the binding mapping for *existing* tokens — use it for token decisions rather than re-deriving the design→project mapping; `TOKEN_CHANGES` covers only the tokens to add
-- `TICKET_ID` — the ticket id (the reference/key in ticketing mode; the front-matter `id` in file-ticket mode), needed for the Phase 4a branch name
-- `ACCEPTANCE_CRITERIA` — the full "Acceptance Criteria" checklist
-- `DESIGN_VALIDATION_PARAMS` — the pre-authored design-validation invocation parameters (design file, app route, design navigation, **app navigation**, **viewport**, **theme context(s)**, focus areas), if present. `kargha-plan` emits these under a "Design Validation Loop (if available)" heading inside "Verification", with the values under a "Validation parameters for this ticket:" sub-label — fuzzy-match on "Design Validation Loop" so the "(if available)" suffix doesn't break extraction. The optional `App navigation` (steps beyond the route to reach the view), `Viewport`, and `Theme context(s)` lines feed Phase 7a's invocation and the theme-context decision
-- `TOKEN_CHANGES` — the "Token Changes" section, if present: a table, one row per proposed token, with columns matching the plan's header exactly — **Token (path → var)**, **Op** (`add` = additive semantic / `add-primitive` / `mutate`), **Value — base / <context>** (alias `{group.token}` or literal), **Source file(s)** (in `<token-source-dir>`), **Covers**, and **Auth** (`autonomous` or `requires build-time confirmation`). This is the **pre-authorization** the Phase 4d tier-gated rule reads: an `add` row with `Auth: autonomous` and a supplied value is the "ticket's plan implies it" signal — apply it without re-asking. A row marked `requires build-time confirmation` (every `add-primitive`/`mutate`), a needed token with **no** row, or an absent section all route to `AskUserQuestion` OR the host user-input prompt
-
-### Phase 2 — Sanity-check the plan and comments against the codebase
-
-Read **both** the plan in the ticket description **and any comments/review notes** on the ticket. Comments may contain bug fixes, corrections, additional requirements, or cross-ticket ordering notes. When a comment contradicts the plan, the comment wins.
-
-**2a. Read and incorporate comments.**
-
-- Bug fixes/corrections override the corresponding plan section
-- Additional requirements add to the implementation checklist
-- Unresolved questions get flagged via `AskUserQuestion` OR the host user-input prompt
-
-In file-ticket mode there are no remote comments; treat any inline "Notes"/"Updates" the file contains the same way, then proceed.
-
-**2b. Verify the plan against the codebase:**
-
-- **Do the referenced/reused files still exist?** Glob/Read the paths the ticket cites as existing — reuse targets, critical-files, and any "depends on" file paths. (Do **not** existence-check the "Files to Create" section — those are new files that by definition don't exist yet; see the conflict check below.)
-- **Do "Files to Create" conflict with existing files?** For each path in the ticket's "Files to Create" section (which `kargha-plan` emits), flag any that already exist with different content — a conflict to resolve, not the expected greenfield case.
-- **Do citations still resolve?** If the plan says "reuse `<some/shared/path>`", search for it with the host's fastest available code-search tool.
-- **Has the surrounding code drifted?** Confirm function signatures and data shapes match.
-
-**2c. Frontend-specific checks:**
-
-- **Design file exists.** Verify the file at `DESIGN_FILE_PATH` exists. If it's been moved or deleted, hard stop and ask the user.
-- **Component library spot-check.** Pick 2–3 entries from the `COMPONENT_LIBRARY_MAP` and verify the referenced `<component-lib>` components still exist at the library's installed path (resolved in Project configuration). Library updates since the ticket was filed could have renamed or removed components. If the library's components can't be enumerated at the installed path (minified/bundled/types-only, or a remote/CDN design system), spot-check via the library's exported type surface or import resolution instead, and treat the check as best-effort rather than a hard mismatch. (Skip if the project has no component library — the mapping's entries are all "custom".)
-- **Route conflict check.** Verify the route path from the plan doesn't already exist with conflicting content.
-
-If a mismatch is load-bearing, use `AskUserQuestion` OR the host user-input prompt to flag it. Minor drift gets silently adapted and noted in the PR body later.
-
-### Phase 3 — Pick up the ticket
-
-Two side-effects, in this order. The mechanism depends on the ticket mode.
-
-**3a. Assign to the current user.** Skip if already assigned to the current user.
-
-- **Ticketing-system mode:** set the assignee field to `CURRENT_USER_ID` via the system's edit/update operation.
-- **File-ticket mode:** write the current user into the ticket file's `assignee` front-matter field (or no-op if the file format has no assignee concept).
-
-**3b. Move to the in-progress status.**
-
-- **Ticketing-system mode:** look up the available transitions/states dynamically (transition ids are typically not stable), find the one whose name matches `<in-progress-status>`, and apply it.
-- **File-ticket mode:** set the ticket file's `status` field to `<in-progress-status>` (or no-op if the file has no status field).
-
-Always look transitions up dynamically — never hard-code transition ids.
-
-### Phase 4 — Create an isolated worktree and implement
-
-**Every ticket gets its own git worktree.** This isolates implementation from whatever is happening in the main checkout.
-
-**4a. Pick the branch name** per the configured branch convention. It must embed the ticket id so the PR step can recover it. Default template:
-
-```
-<prefix>_<ticket-id>_<kebab-slug-from-summary>
+```bash
+uv run skills/kargha-plan/scripts/validate_binder.py --binder <binder path>
 ```
 
-Example: `<prefix>_{{EXAMPLE_TICKET}}_signal-feed-page`. Keep the slug short (~30 chars). **Sanitize the slug** to `[a-zA-Z0-9_-]` only (the summary is untrusted input — e.g. a public issue title — and the branch/path are interpolated into shell commands; strip everything else, e.g. `tr -cd 'a-zA-Z0-9_-'`). The PR step re-extracts the ticket id from the branch name (e.g. via a regex matching the configured ticket-id pattern), so the id must remain literally present in the branch name.
+This checks schema validity, dependency cycles, and dangling `depends_on` references. If the orchestrator already validated the binder for this run, you may take that as satisfied rather than re-running — but never skip validation when invoked directly. On a validation failure, bail with the validator's output.
 
-**4b. Create the worktree** from the default branch, into the configured worktree root:
+**Gate 2 — The item id exists.** Find the work item whose `id` equals the requested id in the binder's `work_items`. If no item matches, bail with the requested id and the list of available ids.
+
+**Gate 3 — Dependencies are merged.** Every id in the item's `depends_on` must already be merged into the integration branch — i.e. its done ref exists. Per [references/integration-branch.md](references/integration-branch.md), check `refs/kargha/<slug>/item-<dep-id>/done` for each dependency. If any dependency is unmet (no done ref), **halt with a call to action**: list the unmet dependencies and note that they must build and merge into `kargha/<slug>/integration` first. `depends_on` is a scheduling constraint — do not build off a missing dependency.
+
+**Resolve git identity** (Project configuration) for commit authorship only. There is no ticketing system, assignee, or status field — drop all of that machinery. If `git config` has no `user.email`/`user.name`, ask once or record an explicit "unattributed" note.
+
+**Extract and cache** from the item for later phases:
+
+- `ITEM_ID` — the item's `id` (drives the branch name and the `[kargha:item-<id>]` commit marker)
+- `ITEM_ORACLE` — the item's `oracle` (acceptance check: `type`, `assertions`, `command`, or an `opt_out` + `reason`)
+- `ITEM_CONTRACT` — the item's `contract`, if present (the interface it exposes/consumes)
+- `ITEM_DEPS` — the resolved `depends_on` ids (all merged, per Gate 3)
+- `SERIALIZE` / `SHARED_RESOURCES` — `serialize` and `shared_resources`, if present (the orchestrator's concern, but note them)
+- UI annex fields, **only if present**: `COMPONENT_MAP` (`component_map`), `ICON_MAP` (`icon_map`), `TOKEN_CHANGES` (`token_changes`), `DESIGN_REFERENCE` (`design_reference`), and the binder's `design_facts.source`
+
+### Phase 2 — Sanity-check the item against the codebase
+
+Read the work item and the binder's `scope`, `design_facts`, and `env_contract`. Then verify the item against the current code:
+
+- **Do referenced/reused files still exist?** Read the paths the item's plan cites as existing. (Do not existence-check files the item is meant to create.)
+- **Do new files conflict with existing ones?** Flag any path the item creates that already exists with different content — a conflict to resolve, not the greenfield case.
+- **Do citations still resolve?** Search for any "reuse `<path>`" target with the host's fastest code-search tool.
+- **Has the surrounding code drifted?** Confirm the function signatures and data shapes the item depends on still match — including anything a merged dependency introduced on the integration tip.
+- **Contract sanity.** If the item declares an `ITEM_CONTRACT`, confirm the external artifact it names (a type, a schema, a contract test) still exists and is the shape the item expects.
+
+**UI annex (only when UI fields are present):** verify `design_facts.source` exists; spot-check 2–3 `COMPONENT_MAP` entries against the resolved library's install path; check the item's route doesn't already exist with conflicting content. If the library can't be enumerated (minified/CDN), spot-check via its exported type surface and treat as best-effort.
+
+If a mismatch matters, flag it and ask. Minor drift gets silently adapted and noted in the final report.
+
+### Phase 3 — (reserved)
+
+No pickup side-effects exist in the binder model — there is no status to transition and no assignee to set. Progress is tracked git-natively through commit markers, wave tags, and the `refs/kargha/` namespace (see [references/integration-branch.md](references/integration-branch.md)). Proceed to Phase 4.
+
+### Phase 4 — Create an isolated worktree off the integration tip and implement
+
+**The item gets its own git worktree, branched off the current integration tip** — not the default branch. This is what resolves dependency chains: the integration tip already contains every merged dependency.
+
+**4a. Pick the branch name**, embedding the item id so later phases can recover it:
 
 ```
-branch="<prefix>_<ticket-id>_<slug>"
-worktree="<worktree-root>/${branch}"
-git worktree add "$worktree" -b "$branch" "<default-branch>"
+kargha/<slug>/item-<item-id>
+```
+
+**Sanitize** any slug-derived portion to `[a-zA-Z0-9_/-]` only (binder fields are untrusted input interpolated into shell commands).
+
+**4b. Create the worktree** from the integration tip:
+
+```bash
+slug="<binder slug>"
+integration="kargha/${slug}/integration"
+branch="kargha/${slug}/item-<item-id>"
+worktree="<worktree-root>/${branch//\//-}"
+git worktree add "$worktree" -b "$branch" "$integration"
 cd "$worktree"
 ```
 
-Create `<worktree-root>` with the host's native filesystem operation if it does not exist; do not assume Bash/WSL/POSIX syntax. If `git worktree add` fails because the branch or path already exists, don't clobber it — stop and ask the user. An existing worktree usually means a prior run they may want to resume.
+Create `<worktree-root>` with the host's native filesystem operation if it does not exist. If the integration branch does not yet exist (first item in the binder), create it from the default branch first, per [references/integration-branch.md](references/integration-branch.md). If `git worktree add` fails because the branch or path already exists, **don't clobber it** — stop and ask; it usually means a prior run the user may want to resume.
 
-Immediately after `cd "$worktree"`, run the mutation guard from [references/worktree-safety.md](references/worktree-safety.md). The actual root must equal `<worktree-root>/<branch>`, and the current branch must be the new ticket branch before any implementation edit.
+Immediately after `cd "$worktree"`, run the mutation guard from [references/worktree-safety.md](references/worktree-safety.md): the actual root must equal the worktree path and the current branch must be the new item branch before any implementation edit.
 
-**4c. Install dependencies.** Run `<install command>` in the worktree before any build/lint/test/dev commands — worktrees need their own dependency links.
+**4c. Install dependencies.** Run `<install command>` in the worktree before any build/lint/test command — worktrees need their own dependency links.
 
-**4c-bis. Build the token manifest (DTCG token systems only).** When the project has a DTCG/tiered token system, build the token manifest before any implementation lookup — see **[references/dtcg-tokens.md](references/dtcg-tokens.md)** ("Phase 4c-bis — Build the token manifest"). Phase 4d, Phase 5's conformance check, and Phase 7's `TOKEN_DRIFT` reverse-map all read it. Skip this step entirely when the project has no DTCG/tiered token system.
+**4c-bis. Build the token manifest (UI + DTCG token systems only).** When the item carries a UI surface and the project has a DTCG/tiered token system, build the token manifest before any token lookup — see **[references/dtcg-tokens.md](references/dtcg-tokens.md)**. Skip entirely otherwise.
 
-**4d. Implement the plan's steps** in the worktree. Follow the ticket's "Component Plan" and "Files to Create" sections. Key rules:
+**4d. Implement the item** against the resolved conventions, stack-agnostically. Key rules:
 
-**High-impact mutation preview.** Before editing auth, routing, guards, security, CI/CD, GitHub rulesets, branch policy, deployment, generated contracts, or environment files, state:
+**High-impact mutation preview.** Before editing auth, routing, guards, security, CI/CD, rulesets, branch policy, deployment, generated contracts, or environment files, state: the exact behavior change; likely files/workflows touched; what stays unchanged; and rollback/containment notes when relevant. Wait for confirmation when the user asked to approve first, or when the change introduces route/security/policy behavior the item did not already authorize.
 
-- the exact behavior change
-- likely files/classes/workflows touched
-- what remains unchanged
-- rollback or containment notes, when relevant
+**CI/policy items.** If the item touches CI, repository automation, branch policy, rulesets, required checks, deployment, generated contracts, or environment policy, load [references/ci-policy.md](references/ci-policy.md) and [references/policy-yagni.md](references/policy-yagni.md) before editing. Summarize the current repo policy first, keep workflows thin, distinguish "runs" from "required", and do not add fork hardening, merge queues, CODEOWNERS, or similar controls unless repo policy or explicit direction requires them.
 
-Wait for confirmation when the user asked to inspect/approve first, or when the change introduces new route/security/policy behavior not already approved in the ticket. Example: "I propose adding `/auth?preview=login` as a local-only inspection mode that suppresses redirect handling only for that page load. Normal `/auth`, guard behavior, and deep-link restoration stay unchanged."
+**General implementation rules (every stack):**
 
-**CI/policy tickets.** If the ticket touches CI, GitHub Actions, repository automation, branch policy, rulesets, required checks, deployment policy, generated contracts, or environment policy, load [references/ci-policy.md](references/ci-policy.md) and [references/policy-yagni.md](references/policy-yagni.md) before editing. Summarize the current repo policy first. Prefer repo-owned PEP 723 Python scripts invoked with `uv run` in uv repos, keep workflows thin, distinguish "runs" from "required", and do not add fork hardening, merge queue, branch-up-to-date requirements, topic branch naming, CODEOWNERS, or similar controls unless repo policy or explicit user direction requires them.
+- Follow the project's structure and convention docs — cite a resolved rules doc if one exists, else apply sensible inline conventions.
+- Implement against the resolved `ITEM_CONTRACT` when present — produce the interface the contract names; do not diverge from it silently.
+- **Declare deferrals inline.** When you skip a test, stub a dependency, or defer an edge case, place a `KARGHA-DEFER(<id>)` marker at the exact site per [references/declared-debt.md](references/declared-debt.md). A deferral is recorded, never silent — it surfaces in the final report.
+- **Never weaken the oracle.** Do not edit or soften the item's `oracle`/acceptance assertions (or its `contract`) to make a check pass. On a genuine oracle-or-contract conflict — the item cannot be implemented as specified without violating one — **halt with a call to action** rather than silently diverging. Code, specs, and tests win; the implementer does not get to move the goalposts.
 
-- Follow the project's component-structure conventions — cite the project's component-rules doc if one was resolved in Project configuration (e.g. PascalCase files, named exports, the project's styling approach, co-located test files); otherwise apply sensible inline conventions.
-- Follow the project's data-layer conventions — cite the project's data-layer-rules doc if one exists (e.g. fragment colocation, the project's preferred query hook, network-mocking for tests).
-- Use `<component-lib>` components per the `COMPONENT_LIBRARY_MAP` — do not rebuild primitives the library provides. (If there is no library, build the "custom" entries the map lists.)
-- Use the exact icon imports from `ICON_MAPPING`; for each "Missing Icons" entry, add the custom SVG the plan flagged rather than substituting a different library icon.
-- All styling must reference the project's theme/token system — component props for library components, theme variables / utility classes in custom styles. Never hardcode hex colors or px values that duplicate what the token system already provides. Use `DESIGN_TOKEN_MAP` for which existing project token each design value maps to (don't re-derive the mapping the plan already made); `TOKEN_CHANGES` covers only tokens to add.
-- **DTCG token systems:** consume only the tier the project's convention allows (typically semantic, never primitives) — look variables up in the token manifest, never by grepping generated CSS, and treat the DTCG JSON in `<token-source-dir>` + `<token-build-command>` as the only token-value edit path (never edit `<generated-token-artifacts>`). When the design needs a value with no token, prefer the nearest existing semantic token; an *additive semantic-tier token* the ticket's **`TOKEN_CHANGES`** section pre-authorizes (operation `add`, semantic tier, name, per-context value) may be added autonomously. The full autonomous-add procedure (idempotency preflight → Value-cell parse → JSON nesting → cssName → alias context-stability → rebuild + verify) and its ` / ` and `{group.token}` parse semantics are in **[references/dtcg-tokens.md](references/dtcg-tokens.md)** ("Phase 4d — Autonomous semantic-token add").
-- Translate design mock data into the project's data layer (e.g. GraphQL queries with fragment colocation, REST calls, or typed-client calls per the resolved data layer).
-- Translate the design's client-side (`useState`) page navigation into the project's router (file-based or config-based routing).
+**Conditional UI/data implementation annex (only when the item carries UI fields):**
 
-All subsequent phases run from inside the worktree directory. Stay `cd`'d in there until the skill finishes.
+- Use `<component-lib>` components per `COMPONENT_MAP` — do not rebuild primitives the library provides; build the "custom" entries the map lists when there is no library.
+- Use the exact icon imports from `ICON_MAP`; for each "Missing Icons" entry, add the custom SVG the plan flagged rather than substituting a different library icon.
+- All styling references the project's theme/token system — never hardcode hex/px values that duplicate what the token system provides.
+- **DTCG token systems:** consume only the tier the project's convention allows (typically semantic, never primitives) — look variables up in the token manifest, never by grepping generated CSS. An *additive semantic-tier token* the item's `TOKEN_CHANGES` pre-authorizes (operation `add`, semantic tier, name, per-context value) may be added autonomously; the full procedure is in **[references/dtcg-tokens.md](references/dtcg-tokens.md)**. A `requires build-time confirmation` row, a needed token with no row, or no `TOKEN_CHANGES` at all routes to a question.
+- Translate design mock data into the project's data layer (GraphQL with fragment colocation, REST calls, typed-client calls per the resolved layer) and the design's client-side navigation into the project's router.
 
-### Phase 5 — Lint + test (deterministic gate)
+All subsequent phases run from inside the worktree. Stay `cd`'d there until the skill finishes.
 
-Run from the worktree before attempting design validation. The code must compile for the dev server to work.
+### Phase 5 — Deterministic gate (the floor)
+
+Run from the worktree before the acceptance loop. This is the floor under every non-opted-out item — compile / type-check / lint clean (see [references/definition-of-done.md](references/definition-of-done.md)):
 
 ```bash
 <lint command>
+<typecheck command>
 <test command>
+<build command>
 ```
 
-These are the deterministic gates. If the project also defines a `typecheck`/`build` target, run it too. (Some projects have no standalone typecheck target — in that case lint + test are the gates.)
+Run whichever of these the project defines. If any fails, fix it in this thread — you own the code — and do not proceed to the acceptance loop until the floor is clean. A change that cannot clear the floor has not earned an acceptance review; if fixes take more than ~2 attempts, surface to the user.
 
-If any fails, fix the issues in the main thread (you own the code). Do not proceed to the dev server or design validation until they pass. If fixes take more than ~2 attempts, surface to the user via `AskUserQuestion` OR the host user-input prompt.
+**UI annex — token-conformance check (DTCG only, single pass folded into this phase, never a loop).** When the DTCG token settings were resolved, run the deterministic three-check scan (generated-artifact reproducibility; no primitive-tier consumption in new code; no hardcoded duplicates of existing tokens), scoped to files changed vs the integration tip. Stage new files first (`git add -A`). Full definitions in **[references/dtcg-tokens.md](references/dtcg-tokens.md)**.
 
-**Token-conformance check (DTCG token systems only — single pass, folded into this phase, never a loop or subagent OR host worker).** When the DTCG token settings were resolved, run the deterministic three-check scan (generated-artifact reproducibility; no primitive-tier consumption in new code; no hardcoded duplicates of existing tokens), scoped to files changed vs `<default-branch>`. Stage new files first (`git add -A`) and skip the check with a `TOKEN_CONFORMANCE: skipped — manifest unavailable` PR note if the manifest is stale. Full check definitions in **[references/dtcg-tokens.md](references/dtcg-tokens.md)** ("Token-conformance check"). Non-DTCG projects rely only on the generic "no hardcoded values that duplicate tokens" rule above.
+### Phase 6 — Acceptance loop
 
-### Phase 5b — Data-layer conformance loop (conditional, up to 3 rounds)
+Once the floor is clean, run the item's acceptance check through the verification gate. The gate is **read-only** — it reports, it never edits — and it runs in a fresh, thin context (only the worktree, the binder, and the item's `oracle`/`contract`). See [references/verification-gate.md](references/verification-gate.md).
 
-**This phase runs whenever the project has a data layer** (e.g. GraphQL with fragment colocation/codegen, or REST/OpenAPI/tRPC). **Skip this entire phase and jump to Phase 6 only when there is no data layer at all, or when no changed file contains a data operation** (computed in 5b-1). A missing conventions doc is **not** a skip trigger: when a data layer exists but no rules doc was resolved, still run the loop and fall back to the inline read-only pass described in 5b-3 (against whatever conventions the repo documents; if truly none, check only that data operations are typed — no `any` — and not duplicated, and note the thin coverage in the PR body).
+**Opt-out items skip the loop.** When `ITEM_ORACLE.opt_out` is true, record the `reason` and skip acceptance (the floor still applies). Report the opt-out in the final summary — opt-outs are explicit and surfaced, never silent (see [references/definition-of-done.md](references/definition-of-done.md)).
 
-Validate that created or modified components follow the project's data-layer conventions (for GraphQL: fragment colocation, fragment/operation naming, imports per the project's GraphQL rules, query/mutation tier boundaries; for other layers: schema conformance, typed-client usage, etc.) before proceeding to the dev server and design validation.
+**Choose the gate by oracle type:**
 
-#### 5b-1. Identify target files
+- **`oracle.type == visual`** → `kargha-validate`. It compares rendered output against the design and needs the dev server up (UI annex; resolve `<dev-server-port>`, the design source, and the item's `design_reference`). The per-round capture/compare mechanism `kargha-validate` uses is in **[references/design-validation-loop.md](references/design-validation-loop.md)**. Skip the visual gate when `design_reference` is `none`.
+- **any other type** (`unit` / `integration` / `e2e` / `smoke`) → `kargha-verify`. It dispositions each of the oracle's `assertions` against the actual diff, and — when the item declares an `ITEM_CONTRACT` — checks the diff against the external contract artifact (a type-checker, schema, or contract test), not against the binder's claim.
 
-Only validate files that were created or modified in this ticket **and** contain data-layer operations. Skip this phase entirely if no files qualify. Use the resolved `<data-layer-detector>` from Project configuration — the literal `graphql(` is just the GraphQL example; for REST/tRPC the detector is "files importing the client or calling the typed endpoints," etc. Anchor on the resolved detector, not the example token. Exclude generated code (the `<generated-code-dir>` resolved in Project configuration, if any) and test files.
+**Kickback and caps.** On any finding, the gate kicks the work back to this skill for **bounded self-correction**, then re-runs on the corrected diff. Per [references/verification-gate.md](references/verification-gate.md) the caps differ by gate:
 
-Stage new files first (`git add -A`) so untracked, just-created files are included in the diff. Then enumerate changed files relative to `<default-branch>` with `git diff --name-only --diff-filter=ACMR <default-branch>...HEAD -- <frontend-app>`, filter in memory or with the host's native tools, and keep only files that:
+- **Safety / boundary scan** (the seven smart-surfaced-review signals re-run on the real diff; see [references/smart-surfaced-review.md](references/smart-surfaced-review.md)) — **max 3 attempts, then escalate to the human.** A boundary the item never justified is a safety question.
+- **Acceptance / contract gate** — **max 2 attempts, then halt with a call to action.** On the second failed attempt, the choice is fix-and-rerun or place a `KARGHA-DEFER` declared-debt marker per [references/declared-debt.md](references/declared-debt.md) that records the unmet assertion as a named deferral.
 
-- match the resolved framework's source extensions
-- are not under `<generated-code-dir>` when one exists
-- are not test/spec files
-- contain the resolved `<data-layer-detector>` pattern or import
+Only on cap exhaustion does the gate halt or escalate — otherwise it self-corrects within the caps and moves on.
 
-Use a repo-owned helper script when this logic becomes non-trivial; do not assume Bash pipelines, `grep`, `find`, or WSL are available locally.
+### Phase 7 — (cleanup for the visual gate)
 
-This produces a list of modified frontend source files (excluding generated code and tests) that contain data-layer operations. If the list is empty, log "No data-layer files modified — skipping data-layer validation" and jump to Phase 6.
+When the visual `kargha-validate` loop started a dev server, stop only the process this run started, using the host's native process handle — never another process's server. This phase is a no-op for non-visual items. (Port-conflict and process-handling details live in [references/design-validation-loop.md](references/design-validation-loop.md).)
 
-#### 5b-2. Per-round structure
+### Phase 8 — (reserved)
+
+### Phase 9 — Commit, secret-scan, and merge into integration — NO PR
+
+Run from inside the worktree. There is **no PR**. The terminal state is a tagged item merged into the integration branch; the user reviews and merges that branch.
+
+**9a. Secret scan before every commit.** Before each commit, run the secret scan from [references/secret-scan.md](references/secret-scan.md) against the **staged diff** only. On a hit, **block the commit and surface the finding** (file, line, matched pattern); mark the item failed with the scan output, preserve the worktree, and halt. Resolution requires removing or rotating the secret (or an in-repo allow-list entry, reviewed alongside the code) before retry.
+
+**9b. Commit** with the item marker in the subject line:
 
 ```
-round = 1
-while round <= 3:
-  # Re-run lint/test if we made fixes (skip for round 1 — Phase 5 already passed)
-  if round > 1:
-    run <lint command> && <test command>
-    if fail: fix, re-run lint/test
-
-  invoke the data-layer conformance validator (see below)
-  parse the structured report
-
-  issues_count = count of Issues (not Warnings) across all files
-
-  if issues_count == 0:
-    break — validation passed
-
-  if round == 3:
-    surface residual issues to user via AskUserQuestion OR host user-input prompt
-    break
-
-  implement fixes based on report
-  round += 1
+[kargha:item-<item-id>] <summary>
 ```
 
-#### 5b-3. Invoke the data-layer conformance validator
+**9c. Merge into the integration branch** per [references/integration-branch.md](references/integration-branch.md):
 
-Run a **read-only conformance check** scoped to the target file list from 5b-1. **Strongly prefer a separate read-only subagent OR host worker so the check runs in an isolated context** — the implementer should not grade its own work. If the project provides a dedicated data-layer conformance validator (a subagent, host worker, or skill — e.g. a GraphQL-conventions checker when the stack is GraphQL/Apollo, or the project's REST/OpenAPI/tRPC schema-conformance equivalent), use it. Pass it the file list and ask it to check each file against the project's data-layer rules.
+1. Rebase/merge the item branch onto the **current** integration tip (which may have advanced as wave-mates merged).
+2. **Re-validate the oracle against the merged result** — the tip moved, so the acceptance check must pass on what actually lands, not on the pre-merge branch. On a merge conflict or a re-validation failure, do a **bounded rebuild** against the new tip, or **halt** if the cap is exhausted.
+3. Merge (ff or no-ff).
+4. Write `refs/kargha/<slug>/item-<item-id>/done` → the merge commit. On a halt, write `refs/kargha/<slug>/item-<item-id>/failed` → the failing tip instead.
 
-Only when the environment provides no subagent, host worker, OR skill mechanism, fall back to an inline read-only pass against the project's data-layer-rules doc, noting that this loses context isolation (the implementer is reviewing its own output). Either way the validator must be **read-only** — it reports, it does not edit — and **MUST** return a per-file `STATUS: PASS | ISSUES_FOUND` line plus a summary containing an explicit issue count (e.g. `Issues found: N across M files`), so the loop can parse the exit condition deterministically.
-
-#### 5b-4. Parse the report and decide
-
-The report MUST include a per-file `STATUS: PASS | ISSUES_FOUND` line and a summary line with an explicit issue count (e.g. `Issues found: N across M files`); the loop parses that count as its exit condition. Since 5b-1 already excludes generated code and tests, only Issues in non-generated files count. Decision logic:
-
-| Condition                            | Action                                                       |
-| ------------------------------------ | ------------------------------------------------------------ |
-| `Issues found: 0` (all files PASS)   | Exit loop — validation passed                                |
-| Issues found, round < 3              | Fix issues in the main thread, re-run lint/test, re-validate |
-| Round 3 reached with residual issues | Stop — surface to user via `AskUserQuestion` OR host user-input prompt |
-
-**Warnings are acceptable** — only Issues (clear rule violations) trigger fixes. Do not attempt to fix Warnings.
-
-#### 5b-5. Implement fixes (main thread)
-
-When fixing issues between rounds:
-
-- Use the report's category and line hints to locate each violation
-- Cross-reference the project's data-layer-rules doc for the correct pattern if the category isn't self-explanatory
-- After fixes, re-run `<lint command> && <test command>` before the next validation round — fixes must not break compilation
-
-#### 5b-6. Edge cases
-
-- **The validator crashes or returns no output:** Treat as a failed round. Retry once. If it fails again, skip data-layer validation entirely and note the failure in the PR body — don't block the PR on a tooling failure.
-- **All issues are in generated code:** This shouldn't happen (generated code is excluded in 5b-1), but if it does, treat as a pass.
-- **A file was deleted between rounds:** Re-compute the target file list before each round to avoid passing stale paths.
-
-### Phase 6 — Start the dev server
-
-The design-validation step requires the frontend app running at the configured dev-server URL `<dev-server-url>`.
-
-Do not assume Bash, WSL, POSIX background syntax, `/tmp`, `curl`, `grep`, `lsof`, or `kill` exist on the developer machine. Use the host's native process and HTTP facilities, or a repo-owned helper script, and record the exact command/handle you used.
-
-**6a. Check port availability** with a host-native mechanism (for example a Python socket probe, PowerShell TCP connection lookup, the project's dev-server status command, or the platform's equivalent). Check both the frontend port and the backend port when the dev target starts a backend.
-
-If something is already on the dev-server port (or the backend port, when the dev target starts one), bail with a message asking the user to stop it first. Do NOT stop another process's dev server. (This guards against *other* processes — when an instruction elsewhere says to **restart** your own dev server, e.g. after a token rebuild or a degraded server in Phase 7e, first stop the recorded `DEV_SERVER_PID` process/handle to free the port, then repeat these Phase 6 steps; otherwise this check sees your own still-running server and bails.)
-
-**6b. Start the dev server as a managed background process/session.** Record its process id or host process handle as `DEV_SERVER_PID` (or the host equivalent), plus its log location. Do not use POSIX `&` syntax unless the host shell is known to support it.
-
-If the dev target transitively starts a backend/API service (resolved in Project configuration), that service also comes up on its port — both are needed when the frontend depends on the backend for data. Note its port for cleanup in Phase 8. (If the project has no local backend dependency, there is just the one dev server.)
-
-**6c. Wait for the server to be ready.** Poll the **specific app route** with a host-native HTTP client until it responds with an expected status such as `200`, `307`, or `308` (not just `/` — many dev servers compile/warm pages on demand). Use an explicit retry limit around 60 seconds and capture failure output.
-
-If the server is not responding after ~60 seconds (30 retries), stop the recorded process/handle and bail with the error. Common causes: port conflict, build error that lint/test didn't catch, or missing environment variables.
-
-**A bare 2xx/3xx is not proof the view rendered when it's behind auth.** An unauthenticated request to a protected route can return `200` on a login page or `3xx` to `/login` — passing this poll while the target view is still unreachable. If the route requires authentication, detect the auth redirect/login-page response here, and treat establishing a logged-in session (and ensuring any backend service the view needs is up) as a Phase 7a prerequisite, not satisfied by this poll. See references/design-validation-loop.md (7a).
-
-**6d. Store `DEV_SERVER_PID`** for cleanup in Phase 8.
-
-### Phase 7 — Design validation loop (conditional, up to 3 rounds)
-
-This is the core frontend differentiator — visual fidelity against the design. **Skip it entirely when `DESIGN_VIEW` is `none`** (setup/foundation tickets; see Phase 1).
-
-**If a design-validation tool/skill is available** (resolved in Project configuration), invoke it with the Phase 1 parameters (`DESIGN_VALIDATION_PARAMS`: design file, app base URL + `APP_ROUTE`, design + app navigation, viewport, theme context(s), focus areas), parse its structured discrepancy report, fix `critical`/`major` issues, and re-run — exiting when **zero critical and zero major** discrepancies remain, capped at **3 rounds**. **If no tool is available**, degrade to browser-automation MCP primitives (navigate/screenshot/evaluate, e.g. Chrome-DevTools or Playwright MCP) against the design view, or to a manual visual checklist if none — fix obvious critical/major discrepancies, capped at the same 3 passes. Re-run lint/test between rounds (round 1 reuses the Phase 5 pass); the Phase 6 dev server must be up. If the validation tool reports its capture dependency is missing (e.g. `playwright-cli` not installed — distinct from no validation tool being configured), surface its install CTA to the user once, treat this round as degraded/manual rather than a fidelity failure, and continue; don't silently fall back as if no validator existed.
-
-The full per-round procedure is in **[references/design-validation-loop.md](references/design-validation-loop.md)** — the tool-invocation contract (7a), the report format + decision table (7b), fix guidance including `TOKEN_DRIFT` reverse-mapping (7c), the loop-control pseudocode (7d), the theme-context smoke/full handling, and the edge cases (7e).
-
-### Phase 8 — Stop the dev server
-
-**Always runs, regardless of outcome.** Whether the skill succeeds, fails at a gate, or hits an error after starting the dev server, this cleanup must happen.
-
-Stop only the process or process tree this run started, using the host's native process handle. If the port is still held afterward, clean up an orphan only when you can prove it was spawned by this run's recorded dev command; never stop an unrelated process that happens to bind the same port. Apply the same guard to the backend port when the dev target started a backend/API service.
-
-This frees only the server *this run* started — consistent with Phase 6a's "do not kill another process's dev server." If the skill exits before Phase 6 (e.g. at a gate in Phase 1), this phase is a no-op. If the project has no backend service, only the dev-server port needs freeing.
-
-### Phase 9 — Open the PR
-
-Run this from inside the worktree directory (you should already be `cd`'d there from Phase 4b).
-
-Open a change request (PR/MR) via the project's mechanism — the VCS CLI (`gh` for GitHub, `glab` for GitLab — note GitLab calls them Merge Requests via `glab mr create`; `tea` for Forgejo/Gitea via `tea pr create`, …) or the ticketing/VCS integration the project uses. If the project has a dedicated PR-creation skill, delegate to it rather than re-implementing commit/push/PR logic; otherwise drive the CLI directly. Honor the configured branch/reviewer/label conventions. Treat reviewers, labels, and a review-status transition as each "if the host supports it; otherwise omit." For a host with no change-request concept at all (push-only remote, email-patch flow), the terminal state is: push the branch and report the branch name + compare URL. The flow:
-
-- Commit with the ticket-prefixed subject line (per the configured title-prefix pattern, if any)
-- Push the branch (the ticket id is recoverable from the branch name per Phase 4a)
-- Open the change request against the repo resolved from the git remote, with the configured title prefix (e.g. `<ticket-id>:`), label set (if the host supports labels), assignee, and reviewer(s) per the configured reviewer-selection rule (if any) — the rule must exclude the PR owner from being their own reviewer
-- Move the ticket to the **review status** `<review-status>`:
-    - **Ticketing-system mode:** transition/update the ticket to the review status (look the transition up dynamically).
-    - **File-ticket mode:** set the ticket file's `status` field to `<review-status>` and report it.
-
-Include this additional context in the PR body:
-
-- **Data-layer validation status** from Phase 5b (e.g., "data-layer conformance: passed after 2 rounds", or "skipped — no data-layer files modified", or "1 residual issue after 3 rounds", or "skipped — project has no data layer")
-- **Design validation status** from the final round (e.g., "design validation: partial — 2 minor cosmetic issues remaining", or "manual checklist — no automated tool available")
-- **Design file reference** so reviewers can compare (e.g., "Design: `{{EXAMPLE_DESIGN_FILE}}` > {{EXAMPLE_ROUTE}} view")
-- **Residual discrepancies** (if any minor/cosmetic issues remain, list them)
-
-Because the branch was pre-created with the ticket id, the PR step does the full create flow (new feature branch, no open PR yet).
-
-**Bypass is not normal flow.** Do not use admin/ruleset bypass as a routine merge path. If the user explicitly authorizes break-glass, follow [references/ci-policy.md](references/ci-policy.md): report why normal merge was blocked, who performed the bypass, explicit authorization, merge commit, and timestamp. If bypass actors exist in rulesets, describe the policy as blocked for normal users with documented break-glass bypass rather than absolute.
+**Do not open a PR.** No `gh`/`glab`/`tea`, no push-to-review, no review-status transition.
 
 ### Phase 10 — Report back
 
 Brief summary to the user (~8 lines):
 
-- Ticket id + URL (or file path, in file-ticket mode)
-- PR URL
-- **Worktree path** — so the user knows where the checkout lives for iterating on review feedback
-- **Data-layer validation summary:** passed/failed, rounds completed, residual issues (if any), or "skipped" (no qualifying files / no data layer)
-- **Design validation summary:** final STATUS, rounds completed, residual discrepancies (if any), or "manual checklist"
-- Acceptance criteria summary — a **self-assessment** from the automated gates (lint, test, token-conformance, design validation), not a full verification. Explicitly flag criteria nothing automatically checked (e.g. accessibility, "co-located test files exist") as needing manual review rather than implying they passed
-- If `AskUserQuestion` OR a host user-input prompt was used during the run, a one-liner noting what got decided
+- **Item id** and the binder slug
+- **Worktree path** — so the user knows where the checkout lives
+- **Integration tip** the item merged to (the merge commit / done ref), or the failed ref on a halt
+- **Acceptance result** — which gate ran (`kargha-verify` / `kargha-validate` / opted out), final disposition, rounds used, any residual finding
+- **Declared-debt summary** — every `KARGHA-DEFER` marker placed (what, why, follow-up), per [references/declared-debt.md](references/declared-debt.md); a deferred item is never reported as fully complete without its deferral list
+- **Secret-scan status** — clean, or blocked-with-finding
+- A self-assessment from the automated gates, explicitly flagging anything nothing checked (e.g. accessibility) as needing manual review rather than implying it passed
 
-Leave the worktree in place — PR review rounds frequently need it back.
+**On a halt, preserve the failing item's worktree and print its path.** Leave the worktree in place on success too — re-runs and review iterations frequently need it back.
 
 ---
 
 ## Gotchas
 
-- **All three Phase 1 gates are hard stops.** Status, assignee, and Design Reference presence. Don't prompt for confirmation — bail immediately on failure.
-- **Don't hardcode the user.** Resolve identity dynamically in Phase 0 from the configured source. In ticketing-system mode, don't fall back to `$USER`, git config, or the harness email — those are the OS/VCS identity. Only file-ticket mode uses the git/config identity.
-- **Ticketing is pluggable.** Map every ticketing concept to both modes: gating reads a status/assignee field (or front-matter `status` / no-op for files), pick-up assigns + transitions (or updates front-matter / no-op), and completion transitions to the review status (or updates front-matter + reports).
-- **Always work in the worktree.** After Phase 4b, every implementation file path must resolve under `<worktree-root>/<branch>/`. The mutation guard in [references/worktree-safety.md](references/worktree-safety.md) is mandatory before every file edit.
-- **Don't clobber an existing worktree.** If `git worktree add` fails, stop and ask.
-- **The branch name must embed the ticket id.** The PR step recovers the id from the branch name — never strip it.
-- **Transitions are looked up dynamically.** Don't hard-code transition/state ids; query the system for them.
-- **Parse the ticket payload per the configured provider.** Field locations and casing differ across JIRA / Linear / GitHub Issues / file front-matter — normalize before comparing.
-- **Always read ticket comments, not just the description.** Comments contain plan-review feedback and corrections. When a comment contradicts the plan, the comment wins. (File tickets: treat inline notes the same way.)
-- **Port conflicts are the #1 failure mode.** Another dev server (or backend) on the configured port will silently cause failures. Always check before starting; never stop another process's server.
-- **Do not assume POSIX tooling.** Local validation may run on Windows without WSL. Prefer host-native commands or repo-owned Python helpers over Bash snippets.
-- **The dev target may start a backend too.** If the project's dev command transitively starts a backend/API service, Phase 8 must stop only the processes this run started.
-- **Resolve the design file path against the worktree root**, not the main checkout. Design files typically live in the repo alongside the app code.
-- **Design validation is expensive.** Each round can spawn capture + comparison subagents OR host workers plus a browser session. The 3-round cap is a mandatory cost control — don't exceed it.
-- **Always run lint/test before design validation.** If the code doesn't compile, the dev server serves a broken page and a whole validation round is wasted on a build error.
-- **Hit the actual app route in the health check, not just `/`.** Dev servers often compile/warm pages on demand; the root might respond while the specific route is still compiling.
-- **The Component-to-Library Map is the contract.** If design validation reports a component fidelity issue, check the map first — the implementation should use exactly the library components specified.
-- **Stop the dev server on every exit path.** Whether the skill succeeds, fails at a gate, or errors after Phase 6, the dev-server port (and backend port, if any) must be freed. Structure cleanup to run on every exit path.
-- **Data-layer validation is conditional and scoped.** Run it only when the project has a data layer with conventions, and only against modified files containing data operations — never the whole source tree, and never generated code. Both the data-layer loop and the design loop are capped at 3 rounds.
-- **Warnings don't block.** Only Issues (clear rule violations) trigger fix-and-retry rounds. Warnings are informational.
-- **Generated token artifacts are read-only ground truth.** In a DTCG setup the generated CSS is what the manifest and conformance checks read — and the one thing never edited. The editable surface is the DTCG JSON; the bridge is `<token-build-command>`.
-- **Compare composite tokens as resolved CSS, never as JSON.** Shadows, typography, and font stacks are objects/arrays in DTCG source but strings in the build output; value comparisons against the JSON shape will always miss. The same goes the other way: token build tools can corrupt multi-layer arrays under naive deep-merge — another reason not to re-implement resolution.
-- **`$type` inherits from groups.** A per-token scan for `$type` misses tokens that inherit it from an ancestor group — read types through the manifest, not by spot-checking leaves.
-- **Vendor `$extensions` keys are project-specific.** The CSS-name extension (e.g. `com.<project>.cssName`) varies per project and may be absent (path-derived names). Detect, don't assume.
-- **Token edits don't reach the page by themselves.** After editing DTCG JSON, run `<token-build-command>`, rebuild the token manifest, and verify the dev server serves the regenerated values (many watchers hot-reload generated CSS; restart the server if values are stale) — otherwise Phase 7 validates against stale tokens.
-- **Transitional-debt blocks are read-only.** Documented legacy carve-outs (e.g. dark mode re-pointing primitives because old CSS consumes them directly) are tolerated where untouched and never "cleaned up" opportunistically — that's its own ticket.
-- **Don't re-enter plan mode.** The plan is already written and lives in the ticket. Your job is execution, not re-planning.
-- **`AskUserQuestion` OR host user-input prompt is for real decisions**, not status updates. Don't interrupt the user to say "starting implementation now."
-- **The planning counterpart is `kargha-plan`.** A ticket without a Design Reference section wasn't authored by it — route non-frontend tickets to a non-frontend implementation skill/agent.
+- **No PR — ever.** The terminal state is a tagged item merged into `kargha/<slug>/integration`. The user reviews and merges the integration branch. No `gh`/`glab`/`tea`, no review transition.
+- **Branch off the integration tip, not the default branch.** That tip already contains every merged dependency; building off the default branch would lose them.
+- **Dependencies must be merged before pickup.** Gate 3 checks `refs/kargha/<slug>/item-<dep>/done` for every `depends_on`; an unmet dependency halts.
+- **The binder is read-only to build.** A build step never edits the plan that governs it — that would corrupt its own governance.
+- **Never weaken the oracle.** Don't edit or soften the acceptance assertions or contract to make a check pass. On a genuine conflict, halt — code/specs/tests win.
+- **Commit marker is mandatory.** Every commit subject carries `[kargha:item-<id>]` so resume and integration can trace it.
+- **Secret scan before every commit.** It inspects the staged diff and blocks on a hit. Block, surface, mark failed, preserve the worktree — don't write the commit.
+- **Acceptance caps differ on purpose.** Safety/boundary gate: 3 attempts then escalate to the human. Acceptance/contract gate: 2 attempts then halt-with-CTA. The gate kicks findings back to build for bounded self-correction; only exhaustion halts.
+- **Re-validate the oracle against the merged tip.** A text-clean merge can still break semantics (a wave-mate renamed a helper). The acceptance check must pass on what lands, not on the pre-merge branch.
+- **Always work in the worktree.** After Phase 4, every implementation path resolves under the worktree root. The mutation guard in [references/worktree-safety.md](references/worktree-safety.md) is mandatory before every edit.
+- **Don't clobber an existing worktree.** If `git worktree add` fails, stop and ask — it usually means a resumable prior run.
+- **UI rules are conditional.** Component maps, icon imports, token rules, and the visual `kargha-validate` loop apply only when the item carries `component_map` / `icon_map` / `token_changes` or a `visual` oracle. A backend / CLI / data / IaC item skips the whole annex.
+- **The visual gate is expensive.** Each `kargha-validate` round can spawn a browser session and capture/compare workers; the loop is capped — don't exceed it.
+- **Declare deferrals inline.** A skipped test or stubbed dependency gets a `KARGHA-DEFER` marker at the site; the report surfaces every one. A deferred item is never reported as fully done without its list.
+- **Opt-outs are explicit and surfaced.** When `oracle.opt_out` is set, skip acceptance (not the floor), record the reason, and report it. There is no silent opt-out.
+- **The floor is non-negotiable.** A change that won't compile / type-check / lint does not earn an acceptance review — it earns a surfacing.
+- **Preserve the failing worktree on halt and print its path.** Don't tear it down — the user needs it to resume.
+- **Don't re-plan.** The plan lives in the binder. Your job is execution of one item, not re-planning. The planning counterpart is `kargha-plan`.
