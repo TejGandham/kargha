@@ -1,7 +1,7 @@
 {
   "name": "kargha",
-  "version": "0.1.0",
-  "description": "Stack-agnostic frontend pipeline: turn a Claude Design OR runtime-JSX design prototype into vertical-slice tickets, implemented frontend code, and visual fidelity validation.",
+  "version": "0.2.0",
+  "description": "Stack-agnostic, ad-hoc orchestration framework. kargha synthesizes a binder of work items (kargha-plan) and delivers it in parallel waves onto a per-binder integration branch (kargha-deliver), building each item in an isolated git worktree (kargha-build) and verifying it against its own acceptance check — behavioral (kargha-verify) or visual (kargha-validate). Works across stacks (frontend, backend, CLI, data, IaC, …) while keeping deep frontend support: component/icon/token mapping, DTCG conformance, and a design-validation loop.",
   "author": {
     "name": "Tej Gandham",
     "email": "tej@engen.tech"
@@ -10,10 +10,13 @@
   "repository": "https://github.com/TejGandham/kargha",
   "license": "MIT",
   "keywords": [
+    "orchestration",
+    "binder",
+    "parallel",
+    "worktree",
+    "agents",
     "frontend",
     "design",
-    "tickets",
-    "worktree",
     "design-validation",
     "dtcg",
     "stack-agnostic"
@@ -21,8 +24,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "kargha",
-    "shortDescription": "Plan, build, and validate frontend slices from design prototypes.",
-    "longDescription": "kargha packages three stack-agnostic frontend skills: plan vertical-slice tickets from a Claude Design OR runtime-JSX design export, build one ticket in an isolated worktree, and validate the running view against the design prototype.",
+    "shortDescription": "Synthesize a binder and deliver it in parallel waves, gated by acceptance checks.",
+    "longDescription": "kargha packages five stack-agnostic orchestration skills and two read-only gate agents. kargha-plan synthesizes a validated binder of work items; kargha-deliver builds them in parallel waves onto a per-binder integration branch; kargha-build implements one item in an isolated worktree; kargha-verify (behavioral) and kargha-validate (visual) are the acceptance gates. Stack-agnostic across frontend, backend, CLI, data, and IaC, while keeping deep frontend support (component/token mapping, DTCG, design validation).",
     "developerName": "Tej Gandham",
     "category": "Productivity",
     "capabilities": [
@@ -31,8 +34,8 @@
     ],
     "websiteURL": "https://github.com/TejGandham/kargha",
     "defaultPrompt": [
-      "Plan frontend tickets from this design.",
-      "Build this kargha frontend ticket.",
+      "Synthesize a kargha binder for this work.",
+      "Deliver this binder in parallel waves.",
       "Validate this running view against the design."
     ]
   }

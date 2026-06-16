@@ -1,23 +1,25 @@
 {
   "name": "kargha",
-  "description": "The kargha frontend skill pipeline — plan → build → validate.",
+  "description": "kargha — a stack-agnostic orchestration framework: plan a binder → deliver it in parallel waves → build each item, gated by verify/validate.",
   "owner": {
     "name": "Tej Gandham",
     "email": "tej@engen.tech"
   },
   "metadata": {
-    "description": "Stack-agnostic frontend skills: design-prototype export → vertical-slice tickets → implementation in a worktree → visual validation.",
-    "version": "0.1.0"
+    "description": "Stack-agnostic orchestration skills + two read-only gate agents: synthesize a binder of work items, deliver it in parallel waves onto a per-binder integration branch, build each item in an isolated worktree, and gate it on behavioral or visual acceptance. Deep frontend support preserved.",
+    "version": "0.2.0"
   },
   "plugins": [
     {
       "name": "kargha",
-      "description": "Frontend pipeline: plan vertical-slice tickets from a design export (kargha-plan), build one in an isolated git worktree and open a PR (kargha-build), and validate visual fidelity against the design prototype (kargha-validate). Resolves the project's stack up front; not tied to any framework, token system, data layer, or ticketing tool.",
+      "description": "Stack-agnostic orchestration framework. Synthesize a binder of work items (kargha-plan), deliver it in parallel waves onto a per-binder integration branch (kargha-deliver), build each item in an isolated git worktree (kargha-build), and gate it on behavioral (kargha-verify) or visual (kargha-validate) acceptance — no PR, ends at the integration branch. Stack-agnostic across frontend, backend, CLI, data, and IaC, while keeping deep frontend support (component/token mapping, DTCG, design validation). Ships two read-only gate agents (kargha-acceptance-reviewer, kargha-safety-auditor).",
       "source": "./",
       "strict": true,
       "skills": [
         "./skills/kargha-plan",
+        "./skills/kargha-deliver",
         "./skills/kargha-build",
+        "./skills/kargha-verify",
         "./skills/kargha-validate"
       ]
     }

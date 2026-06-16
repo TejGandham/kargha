@@ -1,18 +1,82 @@
 # kargha
 
-> **करघा** — *a loom.* Load a design, weave it into built, verified frontend, one slice at a time.
+> **करघा** — *a loom.* Load the work, weave it into built, verified code, many threads at once.
 
-A three-skill pipeline that turns a **design prototype** into **reviewed, merged frontend code** — planning the work, implementing it, and validating visual fidelity. The skills are stack-agnostic: each resolves the project's component library, icon set, token/theme system, data layer, toolchain, and ticketing system up front (detect → ask), then works against whatever it finds.
+## What it is
+
+kargha is a **stack-agnostic, ad-hoc orchestration framework** — narrow, unopinionated, repo-directed. You hand it a problem; it synthesizes a **binder** of work items, then delivers that binder in **parallel waves** onto a per-binder integration branch, building each item in its own isolated git worktree and gating each one against its own acceptance check. There is no project setup, no registry, no invariants file, no stored state — kargha reads the binder and the repo at runtime and nothing else.
+
+It **grew out of, and still contains, a strong frontend pipeline.** UI is one stack among many here — not the default — but the deep frontend machinery is intact: component-to-library mapping, icon mapping, design-token mapping, DTCG conformance, and a screenshot-driven design-validation loop. On a UI item those steps light up; on a backend, CLI, data, or IaC item they simply don't.
+
+## The pipeline
+
+`plan → deliver → build`, with `verify` (behavioral) and `validate` (visual) as the **read-only acceptance gates**, and two read-only agents as the gate workers.
 
 ```
-design HTML export
-   →  kargha-plan       emits vertical-slice tickets (ticketing system OR md/json files)
-   →  kargha-build      implements ONE ticket in a git worktree, opens a PR
-         →  invokes kargha-validate each round: compares the running view to the design,
-            returns a discrepancy report that build fixes against and re-runs
+kargha-plan ──► binder (.kargha/binders/<slug>.json)
+                  │
+kargha-deliver ───┘  builds the binder in PARALLEL WAVES
+                     onto kargha/<slug>/integration
+                       │
+                       ├─ wave: kargha-build item ─┐  (isolated worktree, one per item)
+                       ├─ wave: kargha-build item ─┤
+                       └─ wave: kargha-build item ─┘
+                                   │
+                                   ▼  each item's oracle picks ONE gate
+                       ┌───────────────────────────────┐
+                       │  behavioral  →  kargha-verify  │  ◄─ kargha-acceptance-reviewer
+                       │                                │  ◄─ kargha-safety-auditor
+                       │  visual      →  kargha-validate│
+                       └───────────────────────────────┘
+                                   │
+                                   ▼
+                       assembled integration branch  (no PR — you review + merge)
 ```
 
-`kargha-plan` writes self-contained tickets; `kargha-build` picks up one and drives it to an open PR, calling `kargha-validate` (or any configured design-validation tool) in a capture-compare-fix loop. Each skill is independently usable, but they share one ticket contract so the chain composes.
+Default is parallel; kargha drops to serial only where correctness or collision demands it. The single-item escape hatch is `kargha-build` on its own. Resume is git-native — the integration branch *is* the record, so a later run picks up where a partial one stopped.
+
+## The binder
+
+The **binder** is kargha's spine: one JSON artifact (`.kargha/binders/<slug>.json`) that drives planning, build, and integration end to end. Every skill reads it; none of them write to it during a build run. It is immutable while a wave runs. It carries the slug (which names the integration branch and wave tags), scope, the env contract, optional design facts and token manifest, and an ordered list of work items — each with its dependencies, optional `contract`, optional `shared_resources`/`serialize` flags, and an `oracle` (its acceptance check). The shape is kargha's own — it borrows concepts from keel but has **no keel interop** and follows no keel schema. `validate_binder.py` gates every binder before a run (schema, dependency cycles, dangling references, opt-out summary).
+
+The binder is the cross-skill contract — it **replaces the old ticket contract**. Full field guide: [`skills/kargha-plan/references/binder-reference.md`](skills/kargha-plan/references/binder-reference.md).
+
+## The five skills
+
+### kargha-plan
+
+Ingests a problem or feature description (optionally a design mock or non-functional prototype) and — without fail — **synthesizes a validated binder of work items**. It asks a minimal set of questions, runs a synthesis subagent to draft the binder, and commits on an explicit "commit" verb. It is stack-agnostic: it plans frontend, backend, CLI, data, library/SDK, IaC, mobile, ML, and docs work the same way. On a UI surface it keeps the **full frontend depth** — component/icon/token mapping and DTCG-aware token planning — emitted as the conditional UI fields on the relevant work items.
+
+### kargha-deliver
+
+Takes a **validated binder** and builds all its work items onto the per-binder integration branch in **parallel waves**, serializing only where running two items together would produce a wrong or broken result. It reads the binder, never writes it. The output is a single assembled integration branch you review and merge — no PR, no push. The integration branch is also the resume record: kargha tracks every item through commit markers, wave tags, and the `refs/kargha/` namespace, so a later run detects leftovers and offers to continue or clear.
+
+### kargha-build
+
+Carries **one work item** from pickup to a tagged set of commits merged into the binder's integration branch, all inside an isolated git worktree. Stack-agnostic — the same flow implements a frontend view, a backend endpoint, a CLI command, a data migration, or an IaC change — it resolves a small set of project settings up front (detect → ask), then implements against whatever it finds. It runs the project's lint/test/build plus the item's `oracle`, dispatches the gate, and merges. On a UI item it keeps the **full frontend path**: component/icon/token implementation, DTCG token conformance (Phase 5), data-layer conformance, and the design-validation loop. It does **not** open a PR; it is also the single-item escape hatch.
+
+### kargha-verify
+
+The thin orchestrator for the **behavioral acceptance gate** — for oracle types `unit` / `integration` / `e2e` / `smoke`. It runs read-only in a fresh session against the actual diff, dispatches the two gate agents, aggregates their verdicts, and drives the kickback-to-build and human-escalation loop. It never edits code, tests, or the binder. Visual oracles are not its concern (those go to `kargha-validate`); opt-out oracles bypass it entirely.
+
+### kargha-validate
+
+kargha's **visual acceptance gate** — the gate for oracle `type: visual` items. It compares a single running frontend view against its design prototype (Claude Design or runtime-JSX export), opening both the live app and the served design through bundled `uv`-run capture scripts, capturing screenshots and DOM snapshots, then reporting structured discrepancies across layout, color, typography, spacing, component structure, and visual hierarchy. It is read-only: it reports kickback input for `kargha-build` to self-correct and never fixes anything itself. One view per invocation — the calling pipeline loops.
+
+## The two agents
+
+Both are **read-only verification gates**, ported registry-free from keel's lean-lane agents and dispatched by `kargha-verify` (and, for the behavioral floor, by `kargha-build`):
+
+- **`kargha-acceptance-reviewer`** — judges the diff against the work item's `oracle`/`contract` assertion by assertion: verdict `CONFORMANT | DEVIATION | BLOCKED | SPEC-SUSPECT`.
+- **`kargha-safety-auditor`** — re-runs the seven smart-surfaced-review signals against the real diff and flags any sensitive, destructive, or contract crossing the item never justified: verdict `PASS | VIOLATION`.
+
+## Cross-cutting
+
+- **Stack-agnostic.** No skill assumes a component library, framework, data layer, branch convention, or repo layout. UI is one stack among many, not the only one — concrete tools in the docs (Next.js, Style Dictionary, `playwright-cli`, `localhost:3000`, …) are **examples**, resolved per project.
+- **Ad-hoc, repo-directed.** No setup, no project guide, no invariants registry, no stored state. kargha reads the binder and the repo at runtime; that's all it consults.
+- **Parallel by default, gated.** Items run concurrently in waves and serialize only where correctness or collision demands it; every non-opted-out item clears its acceptance gate before it merges.
+- **Git-native resume.** The integration branch is the record — commit markers, wave tags, and `refs/kargha/` refs let a later run continue or clear a partial one.
+- **No PR.** Delivery ends at the assembled integration branch. You review and merge it; kargha never opens a PR or pushes.
 
 ## Layout
 
@@ -22,82 +86,31 @@ kargha/
   .codex-plugin/      plugin.json                      (Codex packaging)
   .agents/plugins/    marketplace.json                 (repo-local Codex marketplace)
   README.md
+  agents/             kargha-acceptance-reviewer.md  +  kargha-safety-auditor.md
   skills/
-    kargha-plan/      SKILL.md  +  references/{ticket-template.md, dtcg-tokens.md}
-    kargha-build/     SKILL.md  +  references/{dtcg-tokens.md, design-validation-loop.md}
+    kargha-plan/      SKILL.md  +  references/{binder-reference.md, …}
+    kargha-deliver/   SKILL.md  +  references/{integration-branch.md, parallelism-gates.md, …}
+    kargha-build/     SKILL.md  +  references/…
+    kargha-verify/    SKILL.md  +  references/verification-gate.md
     kargha-validate/  SKILL.md  +  scripts/{serve_design.py, capture_view.py}
 ```
 
-Each skill is a self-contained canonical Agent Skill — a directory whose `SKILL.md` carries the frontmatter (`name` + `description`) and the workflow. Heavy, conditionally-needed material (the ticket template, the DTCG token machinery) lives one level deep in `references/` and is loaded on demand, so the always-resident `SKILL.md` bodies stay lean.
+Skills and agents are both auto-discovered: each skill is a directory whose `SKILL.md` carries the frontmatter and workflow (with heavy material in `references/` loaded on demand), and each agent is a markdown file under `agents/` with `name`/`description` frontmatter. The plugin manifests do not enumerate either.
+
+## Requirements
+
+- **`kargha-plan`** needs read access to the work description / design source and the repo; it writes only the binder, never implementation code.
+- **`kargha-deliver`** and **`kargha-build`** need `git` (per-item worktrees), the project's package manager + toolchain (lint/test/build/dev), and the binder on disk.
+- **`kargha-verify`** needs the diff and the binder; it dispatches the two gate agents and runs read-only.
+- **`kargha-validate`** needs [`uv`](https://docs.astral.sh/uv/), [`playwright-cli`](https://playwright.dev) (`npm install -g @playwright/cli@latest`, then `playwright-cli install --skills`), and a browser (Chromium). The running app must already be up — the caller owns the dev server's lifecycle.
 
 ## Install
 
-kargha ships as a self-contained Claude Code plugin + marketplace (the `.claude-plugin/` manifests). Add the marketplace and install — from the **public GitHub** repo, which needs no auth:
+kargha ships as a self-contained Claude Code plugin + marketplace (the `.claude-plugin/` manifests). Add the marketplace and install from the **public GitHub** repo, which needs no auth:
 
 ```bash
 /plugin marketplace add https://github.com/TejGandham/kargha.git
 /plugin install kargha@kargha
 ```
 
-This registers all three skills, namespaced under the plugin: `kargha:kargha-plan`, `kargha:kargha-build`, `kargha:kargha-validate`. (Pre-1.0: the names keep the `kargha-` prefix; they may shorten to `kargha:plan` / `:build` / `:validate` at a stable release.)
-
-## The three skills
-
-### kargha-plan
-
-**Decomposes a design export into vertical-slice tickets for frontend implementation.** Its core output is the **component-to-library mapping** — for every design component, whether it maps to a project library component (with which props/variants), needs a thin wrapper, or must be built custom. Every ticket also carries an icon mapping, a design-token map, a route/layout plan, a data-layer plan, acceptance criteria, and (for DTCG projects) a token-changes authorization.
-
-- **In:** a path to a design HTML export, a natural-language scope ("the whole thing" / "just the feed page"), and a ticket destination.
-- **Out:** one ticket per slice — emitted to a ticketing system (JIRA, Linear, GitHub Issues, …) **or** as Markdown/JSON files (`NN-slug.md` + an `index.md` manifest). The canonical ticket layout lives in [`kargha-plan/references/ticket-template.md`](skills/kargha-plan/references/ticket-template.md).
-- **Invoke with:** "plan the frontend for this design", "break this design into tickets", "create frontend tickets from this design", "slice this design into implementation work".
-
-### kargha-build
-
-**Implements one ticket end-to-end in an isolated git worktree**, from a pickup-eligible status to an open PR. It gates on ticket status/assignee, picks the ticket up, spins up a per-ticket worktree, implements the components against the project's conventions, runs lint/test, optionally validates data-layer conformance (Phase 5b) and DTCG token conformance (Phase 5), starts the dev server, runs the design-validation loop (Phase 7, up to 3 rounds), and opens a PR.
-
-- **In:** a single ticket authored by `kargha-plan` — a ticketing-system id/key/URL **or** a Markdown/JSON ticket file. The ticket must contain a **Design Reference** section.
-- **Out:** implemented code in a worktree, an open PR (or pushed branch + compare URL on hosts without PRs), and the ticket moved to a review status.
-- **Invoke with:** "build this frontend ticket", "implement the frontend ticket", "pick up the frontend work", or any request to implement a ticket with a Design Reference section.
-
-### kargha-validate
-
-**Compares one running view against its design prototype** and reports structured discrepancies — it never fixes them; the caller decides what to act on. It uses two fresh-context workers when available: a **capture** subagent OR host worker (drives `playwright-cli` to screenshot + snapshot both the design prototype and the live app) and a **comparison** subagent OR host worker (sees only the captured data, emits the report).
-
-- **In:** the design HTML file, the app base URL + route, design/app navigation instructions, optional viewport and focus areas.
-- **Out:** a structured report — `STATUS` (match/partial/mismatch), severity-rated `DISCREPANCIES` across layout/color/typography/spacing/components/hierarchy, `TOKEN_DRIFT`, and missing/extra elements.
-- **Invoke with:** "validate against the design", "compare implementation to design", "check design fidelity", "does this match the design".
-- One view per invocation — the calling pipeline loops for multiple views.
-
-## How they connect (the ticket contract)
-
-`kargha-plan` emits, and `kargha-build` extracts and implements, a fixed set of ticket sections. The contract lives in the **emitted ticket** (build parses the ticket payload, not plan's `SKILL.md`), so the section headings and line formats in [`ticket-template.md`](skills/kargha-plan/references/ticket-template.md) are byte-significant — em-dashes, backticks, and ` / ` separators included.
-
-| Ticket section | Produced by `kargha-plan` | Consumed by `kargha-build` |
-|-|-|-|
-| Design Reference (design file, view, navigation) | ticket template | Gate 3 + Phase 1 extraction |
-| Component-to-Library Map | Phase 4a | Phase 4d implementation |
-| Icon Mapping / Missing Icons | Phase 4a.1 | Phase 4d (exact imports) |
-| Design Token Map (+ `00-token-map.md`) | Phase 4a.2 | existing-token decisions |
-| Token Changes (DTCG) | Phase 4a.2 / template | Phase 4d tier-gated creation |
-| Route / Layout (+ Served URL) | ticket template | `APP_ROUTE`, health check |
-| Acceptance Criteria | ticket template | done-definition |
-| Validation parameters | ticket template | Phase 7 design-validation |
-
-`kargha-build` then invokes `kargha-validate` (Phase 7a) with the design file, app base URL, app route, navigation, and viewport, and parses its `STATUS`/`DISCREPANCIES`/`TOKEN_DRIFT` report — fixing critical/major issues and re-running until **zero critical and zero major** remain (the same bar all three skills agree on), capped at 3 rounds.
-
-## Cross-cutting concepts
-
-- **Stack-agnostic.** No skill assumes a specific component library, icon set, theme system, framework, data layer, ticketing system, or repo layout. Concrete tools shown in the docs (Style Dictionary, Next.js, JIRA, `playwright-cli`, `localhost:3000`, …) are **examples**, resolved per project.
-- **Design-input contract.** The design side assumes a **Claude Design OR runtime-JSX HTML export** (`.jsx` sources or an inline `text/babel` script, `useState` view switching, inline styles). `kargha-plan` gates on this format; other export formats are out of scope.
-- **W3C DTCG design tokens.** When the token system is in [W3C DTCG](https://www.designtokens.org/) format (2025.10), the skills map design tokens to the **consumable (semantic) tier only**, derive a token manifest from the generated CSS (never re-implementing DTCG resolution), and let `kargha-plan` author a **Token Changes** section that pre-authorizes `kargha-build` to create additive semantic tokens autonomously (a deterministic Phase 5 check enforces no primitive-tier consumption and no hand-edited generated artifacts). The DTCG-specific machinery lives in each skill's `references/dtcg-tokens.md`. Non-DTCG token systems use the generic "no hardcoded values that duplicate tokens" rule.
-- **Theme contexts.** Alternate contexts (e.g. dark mode) get a cheap render/empty-variable smoke check by default; a full second design-validation loop is opt-in and requires a switchable design prototype, reached through navigation.
-
-## Requirements
-
-- **`kargha-build`** needs `git` (uses per-ticket worktrees), the project's package manager + toolchain (lint/test/build/dev), and access to the ticket source (a ticketing MCP/CLI/REST, or a ticket file).
-- **`kargha-validate`** needs [`uv`](https://docs.astral.sh/uv/), [`playwright-cli`](https://playwright.dev) (`npm install -g @playwright/cli@latest`, then `playwright-cli install --skills` for its companion agent skill), and a browser (Chromium). Its bundled PEP 723 scripts serve the design HTML and capture views; the running app must already be up because the caller owns the dev server's lifecycle.
-- **`kargha-plan`** needs read access to the design export and the project repo; it writes only tickets/files, never implementation code.
-
-## Usage
-
-Invoke a skill by pointing it at its input — e.g. "plan the frontend for `./design-export/`", then "build ticket `03-signal-feed.md`". `kargha-build` calls `kargha-validate` automatically when a design-validation tool is configured; you can also run `kargha-validate` standalone to spot-check fidelity. See each skill's `SKILL.md` for the full phase-by-phase workflow, and its `references/` for the ticket template, the DTCG token machinery, and the design-validation loop procedure.
+This registers all five skills, namespaced under the plugin — `kargha:kargha-plan`, `kargha:kargha-deliver`, `kargha:kargha-build`, `kargha:kargha-verify`, `kargha:kargha-validate` — plus the two gate agents. (Pre-1.0: the names keep the `kargha-` prefix; they may shorten at a stable release.)

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "kargha",
-  "description": "Stack-agnostic frontend pipeline: turn a design-prototype export into reviewed, merged code — plan vertical-slice tickets (kargha-plan), build one in an isolated git worktree and open a PR (kargha-build), and validate visual fidelity against the design (kargha-validate).",
-  "version": "0.1.0",
+  "description": "Stack-agnostic, ad-hoc orchestration framework. kargha synthesizes a binder of work items (kargha-plan) and delivers it in parallel waves onto a per-binder integration branch (kargha-deliver), building each item in an isolated git worktree (kargha-build) and verifying it against its own acceptance check — behavioral (kargha-verify) or visual (kargha-validate). Works across stacks (frontend, backend, CLI, data, IaC, …) while keeping deep frontend support: component/icon/token mapping, DTCG conformance, and a design-validation loop.",
+  "version": "0.2.0",
   "author": {
     "name": "Tej Gandham",
     "email": "tej@engen.tech"
@@ -11,10 +11,13 @@
   "repository": "https://github.com/TejGandham/kargha",
   "license": "MIT",
   "keywords": [
+    "orchestration",
+    "binder",
+    "parallel",
+    "worktree",
+    "agents",
     "frontend",
     "design",
-    "tickets",
-    "worktree",
     "design-validation",
     "dtcg",
     "stack-agnostic"
