@@ -88,11 +88,15 @@ When context is thin on a point, say so — the main thread will interview the u
 
 Report with `file:line` citations.
 
-**UI/design-token annex (conditional).** When the resolved stack has a design or token surface, also report:
+**UI annex — full design analysis (conditional).** When the resolved stack has a UI surface — a design mock or non-functional prototype as input, **or** a component-library / token system in the repo — run kargha's full frontend analysis per **[references/ui-analysis.md](references/ui-analysis.md)** instead of the one-line inventory. Keep the Explore-subagent pattern: that reference drives three read-only passes (run them in parallel where the host allows), each citing `file:line`:
 
-- Component library (from package deps and import statements; may be none).
-- Icon libraries (from deps/imports; may be none).
-- Token/theme system: detect a theme object, CSS custom properties, a design-tokens file (including W3C DTCG JSON — see [references/dtcg-tokens.md](references/dtcg-tokens.md)), a utility-class config, or plain CSS. When the token system is DTCG, also resolve the additional settings in [references/dtcg-tokens.md](references/dtcg-tokens.md) so the binder's `token_manifest` and each work item's `token_changes` can carry tier-correct, build-actionable guidance.
+- **Design analysis** — component inventory (with props, complexity, state), the component-hierarchy tree, the page/view inventory, the design-token inventory *with values* (per theme context), mock-data shapes, and navigation structure (ui-analysis §1).
+- **Codebase + component-library inventory** — existing components/routes/styles/data-layer/client-state/tests, the component-library catalog, icon libraries, and the theme/token inventory (incl. DTCG tier/path/name from the JSON source, resolved values from the generated output) (ui-analysis §2).
+- **Data-layer mapping** — the type-coverage buckets (matched / gap / unused / exists-but-differs / field-level gap), operation mapping, schema gaps, and fetch-boundary planning (ui-analysis §3).
+
+When the token system is W3C DTCG (JSON leaves carrying `$value`/`$type`), also resolve the DTCG-only settings in [references/dtcg-tokens.md](references/dtcg-tokens.md) so the binder's `token_manifest` and each work item's `token_changes` carry tier-correct, build-actionable guidance.
+
+Non-UI stacks skip this annex entirely — the base survey above is all they need.
 
 ---
 
@@ -121,6 +125,15 @@ For each work item, set:
 - `oracle` per [references/definition-of-done.md](references/definition-of-done.md): a real CI-facing check oracle (`type`, `command`, `assertions`) OR an explicit opt-out (`opt_out: true`, `reason: "…"`). The floor is compile + type-check + lint. Use opt-out only when a genuinely better check already exists and recording it here would be redundant — always provide a reason.
 - `serialize: true` and `shared_resources` for items that must not run in parallel (e.g. DB migrations, lock-file changes).
 - UI-only fields (`design_reference`, `component_map`, `icon_map`, `token_changes`) only when the stack has a design surface. Omit them entirely for backend, CLI, data, and other non-UI stacks.
+
+**For UI items — populate the UI fields from the analysis (conditional).** When the stack has a UI surface, decompose the UI work and fill its fields using **[references/ui-analysis.md](references/ui-analysis.md)** and the Phase 1 analysis it produced:
+
+- Break UI work into items with the **vertical-slice heuristics** (foundation slice if the library/theme isn't integrated; one slice per page/view; split list + detail; complex reusable components; cross-cutting features; modals bundled with their view) — ui-analysis §7.
+- Set `estimate` to the **S/M/L** size from the slice's component count and per-component complexity — ui-analysis §7.
+- Set `design_reference` to the view/route the slice renders (or `none` for a pure setup/foundation item).
+- Populate `component_map` from the **component-to-library mapping** (Library match / Library + wrapper / Custom / Composite), `icon_map` from the **icon mapping** (primary → fallback → custom SVG, with the Source column and any missing-icon flags), and `token_changes` from the **design-token mapping** (no-consumable-tier-match tokens recorded as semantic-additive entries with per-context values and Auth) — ui-analysis §4–6. Put the shared design→project token map in the binder-level `token_manifest`.
+
+Non-UI items keep the stack-agnostic synthesis above and carry none of these fields.
 
 **Oracle traceability rule.** Each oracle assertion must be traceable to the item's `contract`. If an assertion references a field, shape, or behavior the `contract` does not declare, flag the gap now — emit the work item with a note that the contract needs expanding rather than writing an assertion that cannot be verified.
 
